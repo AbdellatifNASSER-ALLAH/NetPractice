@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OSI Data Flow Interactive Diagram</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .arrow-down {
+            width: 0; 
+            height: 0; 
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-top: 15px solid #3b82f6; /* Blue-500 */
+            margin: 0 auto;
+        }
+        .arrow-up {
+            width: 0; 
+            height: 0; 
+            border-left: 10px solid transparent;
+            border-right: 10px solid transparent;
+            border-bottom: 15px solid #10b981; /* Emerald-500 */
+            margin: 0 auto;
+        }
+        .layer-box {
+            transition: all 0.3s ease;
+        }
+        .layer-box:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+        /* Custom scrollbar for details */
+        .details-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .details-scroll::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .details-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto">
+        <header class="text-center mb-10">
+            <h1 class="text-3xl md:text-4xl font-bold text-slate-900 mb-2">OSI Model: The Journey of Data</h1>
+            <p class="text-slate-600">Click on any layer below to <span class="font-bold text-indigo-600">Deep Dive</span> into the header details.</p>
+        </header>
+
+        <!-- Main Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 relative">
+            
+            <!-- Column 1: Sender -->
+            <div class="space-y-4">
+                <div class="text-center mb-4">
+                    <h2 class="text-xl font-bold text-blue-700">SENDER</h2>
+                    <p class="text-sm text-slate-500 uppercase tracking-widest">Encapsulation (Down)</p>
+                </div>
+                
+                <!-- Layers Rendered via JS -->
+                <div id="sender-layers" class="space-y-3"></div>
+            </div>
+
+            <!-- Column 2: The Pipe / Details View -->
+            <div class="relative min-h-[600px] bg-white rounded-xl shadow-xl border border-slate-200 p-6 flex flex-col items-center justify-center">
+                
+                <!-- Default State -->
+                <div id="default-view" class="text-center space-y-6">
+                    <div class="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-600">
+                        <!-- Icon: Network -->
+                        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>
+                    </div>
+                    <h3 class="text-2xl font-bold text-slate-800">Select a Layer</h3>
+                    <p class="text-slate-600 max-w-xs mx-auto">Click on any box in the Sender or Receiver column to see exactly what happens to the data at that stage.</p>
+                    <div class="mt-8 p-4 bg-slate-50 rounded-lg border border-slate-200 text-sm text-left">
+                        <p class="font-semibold mb-2">Legend:</p>
+                        <ul class="space-y-2">
+                            <li class="flex items-center"><span class="w-3 h-3 bg-rose-500 rounded-full mr-2"></span> Application Data</li>
+                            <li class="flex items-center"><span class="w-3 h-3 bg-purple-500 rounded-full mr-2"></span> TCP Headers (Ports)</li>
+                            <li class="flex items-center"><span class="w-3 h-3 bg-blue-500 rounded-full mr-2"></span> IP Headers (Addresses)</li>
+                            <li class="flex items-center"><span class="w-3 h-3 bg-amber-500 rounded-full mr-2"></span> Mac Headers (Hardware)</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Active Detail View (Hidden by default) -->
+                <div id="detail-view" class="hidden w-full h-full flex flex-col">
+                    <button onclick="resetView()" class="self-start mb-4 flex items-center text-slate-500 hover:text-indigo-600 transition-colors">
+                        <!-- Icon: Arrow Left -->
+                        <svg class="w-4 h-4 mr-1" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+                        Back
+                    </button>
+                    
+                    <div id="detail-content" class="flex-1 overflow-y-auto details-scroll pr-2">
+                        <!-- Content injected via JS -->
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Column 3: Receiver -->
+            <div class="space-y-4">
+                <div class="text-center mb-4">
+                    <h2 class="text-xl font-bold text-emerald-700">RECEIVER</h2>
+                    <p class="text-sm text-slate-500 uppercase tracking-widest">Decapsulation (Up)</p>
+                </div>
+                
+                <!-- Layers Rendered via JS -->
+                <div id="receiver-layers" class="space-y-3 flex flex-col-reverse"></div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Data for the Diagram -->
+    <script>
+        // Inline SVG Icons to remove external dependency issues
+        const icons = {
+            "layout": `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>`,
+            "file-lock-2": `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h14a2 2 0 0 0 2-2V7.5L14.5 2H6a2 2 0 0 0-2 2v4"/><path d="M14 2v6h6"/><rect width="8" height="5" x="2" y="13" rx="1"/><path d="M4 13v-2a2 2 0 1 1 4 0v2"/></svg>`,
+            "history": `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 12"/><path d="M3 3v9h9"/><path d="M12 7v5l4 2"/></svg>`,
+            "truck": `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2"/><path d="M15 18H9"/><path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14"/><circle cx="17" cy="18" r="2"/><circle cx="7" cy="18" r="2"/></svg>`,
+            "globe": `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" x2="22" y1="12" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`,
+            "share-2": `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>`,
+            "activity": `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>`,
+            "package-plus": `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 13a2.5 2.5 0 0 1 2.5 2.5V20a2.5 2.5 0 0 1-2.5 2.5h-9A2.5 2.5 0 0 1 4.5 20v-4.5"/><path d="M10 20.5 4.79 17.76a2 2 0 0 1-1.03-1.48l-.7-5.51A2 2 0 0 1 4.9 8.65L10 6l6.89 3.6a2 2 0 0 1 1.05 1.5l.38 2.57"/><path d="M10 6v7.4"/><path d="M16 11h6"/><path d="M19 8v6"/></svg>`
+        };
+
+        const layers = [
+            {
+                id: 7,
+                name: "Application",
+                pdu: "Data",
+                color: "bg-rose-100 border-rose-300 text-rose-800",
+                icon: "layout",
+                shortDesc: "User Interface",
+                deepDive: {
+                    title: "Layer 7: Application Layer",
+                    analogy: "Writing the Letter",
+                    headerName: "HTTP Header",
+                    addedInfo: [
+                        { label: "Request Method", value: "POST (Sending Data)" },
+                        { label: "URL", value: "https://shop.com/pay" },
+                        { label: "User-Agent", value: "Chrome/90.0" }
+                    ],
+                    action: "The browser takes your input and formats it into a standard HTTP request."
+                }
+            },
+            {
+                id: 6,
+                name: "Presentation",
+                pdu: "Data",
+                color: "bg-rose-100 border-rose-300 text-rose-800",
+                icon: "file-lock-2",
+                shortDesc: "Encryption & Format",
+                deepDive: {
+                    title: "Layer 6: Presentation Layer",
+                    analogy: "Translating & Sealing",
+                    headerName: "SSL/TLS Record",
+                    addedInfo: [
+                        { label: "Encoding", value: "JSON / UTF-8" },
+                        { label: "Encryption", value: "AES-256 (Data Scrambled)" },
+                        { label: "Compression", value: "GZIP" }
+                    ],
+                    action: "Ensures the data is readable by the receiver and secure from prying eyes."
+                }
+            },
+            {
+                id: 5,
+                name: "Session",
+                pdu: "Data",
+                color: "bg-rose-100 border-rose-300 text-rose-800",
+                icon: "history",
+                shortDesc: "Connection Mgmt",
+                deepDive: {
+                    title: "Layer 5: Session Layer",
+                    analogy: "Starting the Conversation",
+                    headerName: "Session Header",
+                    addedInfo: [
+                        { label: "Session ID", value: "SID-8923410" },
+                        { label: "Control", value: "Keep-Alive" }
+                    ],
+                    action: "Keeps this specific conversation separate from other tabs or background downloads."
+                }
+            },
+            {
+                id: 4,
+                name: "Transport",
+                pdu: "Segment",
+                color: "bg-purple-100 border-purple-300 text-purple-800",
+                icon: "truck",
+                shortDesc: "Reliability & Ports",
+                deepDive: {
+                    title: "Layer 4: Transport Layer",
+                    analogy: "Numbering the Boxes",
+                    headerName: "TCP Header",
+                    addedInfo: [
+                        { label: "Source Port", value: "53211 (Your Browser Tab)" },
+                        { label: "Dest Port", value: "443 (HTTPS Server)" },
+                        { label: "Sequence Num", value: "101 (Order tracking)" },
+                        { label: "Window Size", value: "65535 (Flow Control)" }
+                    ],
+                    action: "Breaks data into chunks. Ensures reliable delivery. If a chunk is lost, this layer asks for a resend."
+                }
+            },
+            {
+                id: 3,
+                name: "Network",
+                pdu: "Packet",
+                color: "bg-blue-100 border-blue-300 text-blue-800",
+                icon: "globe",
+                shortDesc: "Routing & Logic",
+                deepDive: {
+                    title: "Layer 3: Network Layer",
+                    analogy: "Addressing the Package",
+                    headerName: "IP Header",
+                    addedInfo: [
+                        { label: "Source IP", value: "192.168.1.5 (You)" },
+                        { label: "Dest IP", value: "172.217.10.1 (Shop)" },
+                        { label: "TTL", value: "64 (Time To Live)" },
+                        { label: "Protocol", value: "6 (TCP)" }
+                    ],
+                    action: "Adds logical addresses (IPs) so routers know where to send the packet across the internet."
+                }
+            },
+            {
+                id: 2,
+                name: "Data Link",
+                pdu: "Frame",
+                color: "bg-amber-100 border-amber-300 text-amber-800",
+                icon: "share-2",
+                shortDesc: "Physical Address",
+                deepDive: {
+                    title: "Layer 2: Data Link Layer",
+                    analogy: "The Local Delivery Truck",
+                    headerName: "Ethernet Header",
+                    addedInfo: [
+                        { label: "Source MAC", value: "AA:BB:CC:11:22:33" },
+                        { label: "Dest MAC", value: "DD:EE:FF:44:55:66" },
+                        { label: "EtherType", value: "0x0800 (IPv4)" },
+                        { label: "Trailer (FCS)", value: "CRC32 (Error Check)" }
+                    ],
+                    action: "Handles node-to-node delivery (e.g., PC to Router). The MAC address changes at every router hop!"
+                }
+            },
+            {
+                id: 1,
+                name: "Physical",
+                pdu: "Bits",
+                color: "bg-slate-200 border-slate-300 text-slate-800",
+                icon: "activity",
+                shortDesc: "Wires & Signals",
+                deepDive: {
+                    title: "Layer 1: Physical Layer",
+                    analogy: "The Highway",
+                    headerName: "Raw Signal",
+                    addedInfo: [
+                        { label: "Medium", value: "Copper / Fiber / Wi-Fi" },
+                        { label: "Encoding", value: "NRZ / Manchester" },
+                        { label: "Signal", value: "Voltage High/Low" }
+                    ],
+                    action: "Transmits the raw binary stream (1011001) over the physical medium."
+                }
+            }
+        ];
+
+        // Render Layers
+        const senderContainer = document.getElementById('sender-layers');
+        const receiverContainer = document.getElementById('receiver-layers');
+
+        function createLayerCard(layer, isSender) {
+            const div = document.createElement('div');
+            div.className = `layer-box cursor-pointer p-4 rounded-lg border-l-4 shadow-sm flex items-center justify-between ${layer.color} border-l-${layer.color.split(' ')[0].replace('bg-', '')}`;
+            div.onclick = () => showDetail(layer, isSender);
+            
+            // Note: Removed the i tag and replaced with manual SVG insertion if needed, 
+            // but simplified design here uses text/color primarily. 
+            // If we want the icon in the card, we can inject it.
+            // Let's inject the icon into the flex container.
+            
+            const content = `
+                <div class="flex items-center gap-3">
+                    <div class="font-bold text-lg w-6">${layer.id}</div>
+                    <div class="w-8 h-8 flex items-center justify-center opacity-70">
+                        ${icons[layer.icon] || ''}
+                    </div>
+                    <div>
+                        <div class="font-bold leading-tight">${layer.name}</div>
+                        <div class="text-xs opacity-75">${layer.pdu}</div>
+                    </div>
+                </div>
+                <div class="hidden md:block text-xs font-semibold opacity-60 uppercase">${layer.shortDesc}</div>
+            `;
+            
+            div.innerHTML = content;
+            return div;
+        }
+
+        layers.forEach(layer => {
+            senderContainer.appendChild(createLayerCard(layer, true));
+        });
+
+        // For receiver, we need a reversed copy to render bottom-up visually, 
+        // but the Flex-col-reverse in the container handles the visual stacking.
+        // We just append normally here.
+        layers.forEach(layer => {
+            receiverContainer.appendChild(createLayerCard(layer, false));
+        });
+
+        function showDetail(layer, isSender) {
+            document.getElementById('default-view').classList.add('hidden');
+            document.getElementById('detail-view').classList.remove('hidden');
+            
+            const direction = isSender ? "Encapsulation (Adding Headers)" : "Decapsulation (Removing Headers)";
+            const dirColor = isSender ? "text-blue-600" : "text-emerald-600";
+            
+            let html = `
+                <div class="mb-6 pb-4 border-b border-slate-100">
+                    <h2 class="text-2xl font-bold ${dirColor} mb-1">${layer.deepDive.title}</h2>
+                    <p class="text-slate-500 font-medium">${direction}</p>
+                </div>
+
+                <div class="bg-indigo-50 p-4 rounded-lg mb-6">
+                    <h4 class="text-indigo-800 font-bold text-sm uppercase tracking-wide mb-2">Real World Analogy</h4>
+                    <p class="text-indigo-900 italic">"${layer.deepDive.analogy}"</p>
+                </div>
+
+                <div class="space-y-4">
+                    <h3 class="font-bold text-slate-800 flex items-center gap-2">
+                        <span class="w-5 h-5 text-indigo-600">${icons['package-plus']}</span>
+                        The ${isSender ? 'Added' : 'Read'} Header Data
+                    </h3>
+                    
+                    <div class="bg-slate-800 text-slate-200 rounded-md p-4 font-mono text-sm shadow-inner">
+                        <div class="text-emerald-400 font-bold border-b border-slate-600 pb-2 mb-2">
+                             [ ${layer.deepDive.headerName} ]
+                        </div>
+                        ${layer.deepDive.addedInfo.map(item => `
+                            <div class="flex justify-between py-1">
+                                <span class="text-slate-400">${item.label}:</span>
+                                <span class="text-white">${item.value}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <div class="text-sm text-slate-600 leading-relaxed mt-4">
+                        <span class="font-bold">What happens here:</span> ${layer.deepDive.action}
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('detail-content').innerHTML = html;
+        }
+
+        function resetView() {
+            document.getElementById('default-view').classList.remove('hidden');
+            document.getElementById('detail-view').classList.add('hidden');
+        }
+
+    </script>
+</body>
+</html>
