@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connection Sequence: TCP & TLS Flow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        
+        /* Timeline Lines */
+        .timeline-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #e2e8f0;
+            z-index: 0;
+        }
+        
+        /* Message Arrow Styling */
+        .message-arrow {
+            position: relative;
+            height: 2px;
+            background: #94a3b8;
+            transition: all 0.3s ease;
+        }
+        .message-arrow::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            width: 0; 
+            height: 0; 
+            border-top: 5px solid transparent;
+            border-bottom: 5px solid transparent;
+        }
+        /* Right pointing arrow */
+        .arrow-right::after {
+            right: 0;
+            border-left: 8px solid #94a3b8;
+        }
+        /* Left pointing arrow */
+        .arrow-left::after {
+            left: 0;
+            border-right: 8px solid #94a3b8;
+        }
+
+        /* Hover Effects */
+        .step-container:hover .message-arrow { background: #3b82f6; height: 3px; }
+        .step-container:hover .arrow-right::after { border-left-color: #3b82f6; }
+        .step-container:hover .arrow-left::after { border-right-color: #3b82f6; }
+        .step-container:hover .step-card { border-color: #3b82f6; transform: scale(1.05); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+        .step-container:hover .step-label { color: #1d4ed8; font-weight: bold; }
+
+        /* Layer Stack Visualizer Styles */
+        .layer-brick {
+            height: 24px;
+            border: 1px solid #cbd5e1;
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-family: monospace;
+            color: #94a3b8;
+            background: #f8fafc;
+            border-radius: 2px;
+            transition: all 0.2s;
+        }
+        .layer-brick.active {
+            background: #3b82f6;
+            color: white;
+            border-color: #2563eb;
+            font-weight: bold;
+            box-shadow: 0 0 8px rgba(59, 130, 246, 0.5);
+        }
+        .layer-brick.top-layer {
+            background: #1d4ed8; /* Darker blue for the destination layer */
+            transform: scale(1.05);
+            z-index: 10;
+        }
+        .path-line {
+            stroke-dasharray: 10;
+            animation: dash 1s linear infinite;
+        }
+        @keyframes dash {
+            to { stroke-dashoffset: -20; }
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 p-4 flex-none z-20 shadow-sm">
+        <div class="flex justify-between items-center w-full px-4">
+            <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                Connection Flow Visualizer
+            </h1>
+            <div class="flex gap-4 text-xs md:text-sm font-medium">
+                <div class="flex items-center gap-2"><span class="w-2 h-2 md:w-3 md:h-3 rounded-full bg-blue-500"></span> TCP (L4)</div>
+                <div class="flex items-center gap-2"><span class="w-2 h-2 md:w-3 md:h-3 rounded-full bg-purple-500"></span> TLS/SSL (L6)</div>
+                <div class="flex items-center gap-2"><span class="w-2 h-2 md:w-3 md:h-3 rounded-full bg-emerald-500"></span> HTTP (L7)</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area: Split View -->
+    <div class="flex-1 flex overflow-hidden">
+        
+        <!-- Left Pane: Diagram -->
+        <main class="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50/50 relative">
+            <div class="max-w-3xl mx-auto relative min-h-[800px]">
+                
+                <!-- Columns (Client / Server) -->
+                <div class="flex justify-between font-bold text-lg mb-8 sticky top-0 bg-slate-50 z-10 py-4 border-b border-slate-200 shadow-[0_4px_6px_-1px_rgba(0,0,0,0.05)]">
+                    <div class="w-1/3 text-center flex flex-col items-center">
+                        <div class="w-10 h-10 md:w-12 md:h-12 bg-white border border-slate-200 shadow-sm rounded-full flex items-center justify-center mb-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 md:w-6 md:h-6 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+                        </div>
+                        Client
+                    </div>
+                    <div class="w-1/3 text-center flex flex-col items-center">
+                        <div class="w-10 h-10 md:w-12 md:h-12 bg-white border border-slate-200 shadow-sm rounded-full flex items-center justify-center mb-2">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 md:w-6 md:h-6 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+                        </div>
+                        Server
+                    </div>
+                </div>
+
+                <!-- Vertical Timeline Lines -->
+                <div class="absolute top-28 bottom-0 left-[16.6%] timeline-line"></div>
+                <div class="absolute top-28 bottom-0 right-[16.6%] timeline-line"></div>
+
+                <!-- Phases -->
+                <div id="flow-container" class="space-y-12 mt-8 pb-10">
+                    <!-- Javascript will inject steps here -->
+                </div>
+
+            </div>
+        </main>
+
+        <!-- Right Pane: Details Sidebar -->
+        <aside class="w-96 bg-white border-l border-slate-200 flex flex-col shadow-xl z-10">
+            
+            <!-- Default State (Empty) -->
+            <div id="empty-state" class="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-16 h-16 mb-4 opacity-30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg>
+                <p class="font-medium">Hover over any step in the diagram to inspect the packet flow and headers.</p>
+            </div>
+
+            <!-- Active State -->
+            <div id="detail-content" class="hidden flex-col h-full">
+                
+                <!-- Top Section: Header Info -->
+                <div class="p-6 border-b border-slate-100 bg-slate-50/50">
+                    <div class="mb-3">
+                        <span id="detail-badge" class="px-2 py-1 rounded text-xs font-bold uppercase tracking-wider bg-slate-200 text-slate-600">Protocol</span>
+                    </div>
+                    <h2 id="detail-title" class="text-xl font-bold text-slate-800 leading-tight mb-2">Step Title</h2>
+                    <p id="detail-desc" class="text-sm text-slate-600 leading-relaxed">
+                        Description goes here.
+                    </p>
+                </div>
+
+                <!-- Middle Section: Packet Preview -->
+                <div class="p-6 border-b border-slate-100">
+                    <div class="text-[10px] font-bold text-slate-400 uppercase mb-2 flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+                        Packet Payload / Header
+                    </div>
+                    <div class="bg-slate-800 rounded-lg p-4 shadow-inner relative overflow-hidden group">
+                        <div class="absolute top-0 right-0 p-2 opacity-50">
+                            <div class="flex gap-1">
+                                <div class="w-2 h-2 rounded-full bg-red-500"></div>
+                                <div class="w-2 h-2 rounded-full bg-yellow-500"></div>
+                                <div class="w-2 h-2 rounded-full bg-green-500"></div>
+                            </div>
+                        </div>
+                        <pre id="detail-header" class="font-mono text-xs text-green-400 overflow-x-auto whitespace-pre-wrap leading-relaxed">Flags: [SYN]</pre>
+                    </div>
+                </div>
+
+                <!-- Bottom Section: Stack Visualizer -->
+                <div class="flex-1 p-6 bg-slate-50 flex flex-col min-h-0">
+                    <div class="text-xs font-bold text-slate-400 uppercase mb-4 flex justify-between items-center">
+                        <span>Layer Traversal</span>
+                        <span class="text-blue-500 font-mono text-[10px]" id="path-desc">Path: L4 <-> L4</span>
+                    </div>
+
+                    <div class="flex-1 flex items-stretch gap-4 relative">
+                        
+                        <!-- Client Stack -->
+                        <div class="flex-1 flex flex-col gap-1 z-10">
+                             <div class="text-[10px] text-center text-slate-400 font-bold mb-1">CLIENT</div>
+                             <div id="client-stack" class="flex flex-col gap-1 h-full justify-end"></div>
+                        </div>
+
+                        <!-- Middle Animation -->
+                        <div class="w-8 flex flex-col items-center justify-end pb-4">
+                            <div class="h-full w-[2px] bg-slate-200 rounded relative">
+                                <!-- The "Wire" is visualized as the bottom connection -->
+                            </div>
+                            <svg width="40" height="20" class="mt-2">
+                                <path d="M 0 10 Q 20 15 40 10" stroke="#cbd5e1" stroke-width="2" fill="none" />
+                            </svg>
+                        </div>
+
+                        <!-- Server Stack -->
+                        <div class="flex-1 flex flex-col gap-1 z-10">
+                            <div class="text-[10px] text-center text-slate-400 font-bold mb-1">SERVER</div>
+                            <div id="server-stack" class="flex flex-col gap-1 h-full justify-end"></div>
+                        </div>
+
+                    </div>
+                    
+                    <div class="mt-3 text-center">
+                         <div class="inline-flex items-center gap-2 px-3 py-1 bg-white border border-slate-200 rounded-full text-[10px] text-slate-500 shadow-sm">
+                            <div class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                            Active Layers
+                         </div>
+                    </div>
+                </div>
+
+            </div>
+        </aside>
+
+    </div>
+
+    <script>
+        // --- DATA DEFINITION ---
+        const steps = [
+            // --- PHASE 1: TCP ---
+            {
+                type: 'phase',
+                label: 'PHASE 1: TCP Handshake',
+                color: 'text-blue-600 bg-blue-50 border-blue-200'
+            },
+            {
+                id: 1,
+                proto: 'TCP',
+                name: 'SYN',
+                from: 'Client',
+                to: 'Server',
+                style: 'blue',
+                layerDepth: 4,
+                details: {
+                    header: "Flags: [SYN]\nSeq: 0\nAck: 0",
+                    desc: "<b>Initiation:</b> The Client's OS (Transport Layer) generates a SYN packet. It travels down to the physical wire, crosses the network, and goes up to the Server's Transport Layer. The Server's App Layer (L7) is NOT involved yet."
+                }
+            },
+            {
+                id: 2,
+                proto: 'TCP',
+                name: 'SYN, ACK',
+                from: 'Server',
+                to: 'Client',
+                style: 'blue',
+                layerDepth: 4,
+                details: {
+                    header: "Flags: [SYN, ACK]\nSeq: 0\nAck: 1",
+                    desc: "<b>Response:</b> The Server's OS receives the SYN at Layer 4. It generates a response (SYN-ACK) and sends it back down the stack. It never touches the Application Layer."
+                }
+            },
+            {
+                id: 3,
+                proto: 'TCP',
+                name: 'ACK',
+                from: 'Client',
+                to: 'Server',
+                style: 'blue',
+                layerDepth: 4,
+                details: {
+                    header: "Flags: [ACK]\nSeq: 1\nAck: 1",
+                    desc: "<b>Establishment:</b> The Client OS sends the final ACK. The connection is established at Layer 4. The OS can now tell the Browser (L7): 'Socket Ready'."
+                }
+            },
+
+            // --- PHASE 2: TLS ---
+            {
+                type: 'phase',
+                label: 'PHASE 2: TLS Handshake',
+                color: 'text-purple-600 bg-purple-50 border-purple-200'
+            },
+            {
+                id: 4,
+                proto: 'TLS',
+                name: 'Client Hello',
+                from: 'Client',
+                to: 'Server',
+                style: 'purple',
+                layerDepth: 6,
+                details: {
+                    header: "Content: Handshake\nVersion: TLS 1.2\nRandom: 0x8F2A...",
+                    desc: "<b>Security:</b> Now the Browser (App) steps in. It sends a 'Client Hello' which passes through Presentation (encryption setup) and down the stack."
+                }
+            },
+            {
+                id: 5,
+                proto: 'TLS',
+                name: 'Server Hello',
+                from: 'Server',
+                to: 'Client',
+                style: 'purple',
+                layerDepth: 6,
+                details: {
+                    header: "Cert: *.google.com\nCipher: AES_256_GCM",
+                    desc: "<b>Identity:</b> The Server App/Library responds with its Certificate. This data must travel all the way up to Layer 6/7 to be processed."
+                }
+            },
+
+            // --- PHASE 3: HTTP ---
+            {
+                type: 'phase',
+                label: 'PHASE 3: Application Data',
+                color: 'text-emerald-700 bg-emerald-50 border-emerald-200'
+            },
+            {
+                id: 8,
+                proto: 'HTTP',
+                name: 'GET /index.html',
+                from: 'Client',
+                to: 'Server',
+                style: 'emerald',
+                layerDepth: 7,
+                details: {
+                    header: "GET / HTTP/1.1\nHost: shop.com\nUser-Agent: Mozilla/5.0",
+                    desc: "<b>User Data:</b> Finally! The actual request. This is generated at Layer 7 (Browser), encrypted at L6, segmented at L4, routed at L3, framed at L2, and sent at L1."
+                }
+            },
+            {
+                id: 9,
+                proto: 'HTTP',
+                name: 'HTTP 200 OK',
+                from: 'Server',
+                to: 'Client',
+                style: 'emerald',
+                layerDepth: 7,
+                details: {
+                    header: "HTTP/1.1 200 OK\nContent-Type: text/html\nContent-Length: 1024",
+                    desc: "<b>Content:</b> The Server Application generates the HTML, sends it down the full stack, and it travels up the full Client stack to be rendered."
+                }
+            }
+        ];
+
+        // --- RENDER LOGIC ---
+        const container = document.getElementById('flow-container');
+        const emptyState = document.getElementById('empty-state');
+        const detailContent = document.getElementById('detail-content');
+        
+        const detailTitle = document.getElementById('detail-title');
+        const detailBadge = document.getElementById('detail-badge');
+        const detailHeader = document.getElementById('detail-header');
+        const detailDesc = document.getElementById('detail-desc');
+        const pathDesc = document.getElementById('path-desc');
+
+        // Init Stack Visualizers
+        const layers = [
+            { id: 7, name: 'App' },
+            { id: 6, name: 'Pres' },
+            { id: 5, name: 'Sess' },
+            { id: 4, name: 'Trans' },
+            { id: 3, name: 'Net' },
+            { id: 2, name: 'Link' },
+            { id: 1, name: 'Phys' }
+        ];
+
+        function renderStacks() {
+            const clientContainer = document.getElementById('client-stack');
+            const serverContainer = document.getElementById('server-stack');
+            
+            // Clear
+            clientContainer.innerHTML = '';
+            serverContainer.innerHTML = '';
+
+            layers.forEach(l => {
+                // Client Brick
+                const cBrick = document.createElement('div');
+                cBrick.className = 'layer-brick';
+                cBrick.id = `c-layer-${l.id}`;
+                cBrick.innerText = `L${l.id}`;
+                cBrick.title = l.name; // Tooltip
+                clientContainer.appendChild(cBrick);
+
+                // Server Brick
+                const sBrick = document.createElement('div');
+                sBrick.className = 'layer-brick';
+                sBrick.id = `s-layer-${l.id}`;
+                sBrick.innerText = `L${l.id}`;
+                sBrick.title = l.name;
+                serverContainer.appendChild(sBrick);
+            });
+        }
+        renderStacks();
+
+        steps.forEach(step => {
+            if (step.type === 'phase') {
+                const div = document.createElement('div');
+                div.className = `text-center py-2 px-4 mx-auto w-fit rounded-full text-xs font-bold uppercase tracking-widest border shadow-sm ${step.color}`;
+                div.innerText = step.label;
+                container.appendChild(div);
+                return;
+            }
+
+            const isRight = step.from === 'Client';
+            const arrowClass = isRight ? 'arrow-right' : 'arrow-left';
+            const alignClass = isRight ? 'flex-row' : 'flex-row-reverse';
+            const colorClass = step.style === 'blue' ? 'bg-blue-50 text-blue-800 border-blue-200' :
+                             step.style === 'purple' ? 'bg-purple-50 text-purple-800 border-purple-200' : 
+                             'bg-emerald-50 text-emerald-800 border-emerald-200';
+
+            const row = document.createElement('div');
+            row.className = `step-container flex ${alignClass} items-center justify-between px-[16.6%] relative cursor-pointer group`;
+            
+            row.innerHTML = `
+                <div class="w-5/12"></div> <!-- Spacer -->
+                
+                <div class="w-full relative px-4 py-2">
+                    <div class="absolute top-1/2 left-0 right-0 -translate-y-1/2">
+                        <div class="message-arrow ${arrowClass}"></div>
+                    </div>
+                    <div class="relative z-10 text-center">
+                        <span class="step-card inline-block px-3 py-1.5 bg-white border border-slate-200 rounded shadow-sm text-xs font-mono text-slate-500 transition-all duration-200 ${colorClass}">
+                            ${step.name}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="w-5/12"></div> <!-- Spacer -->
+            `;
+
+            // Hover Events
+            row.addEventListener('mouseenter', () => showDetails(step));
+            
+            container.appendChild(row);
+        });
+
+        function showDetails(step) {
+            emptyState.classList.add('hidden');
+            detailContent.classList.remove('hidden');
+            detailContent.classList.add('flex');
+
+            // Update Text
+            detailTitle.innerText = step.name;
+            detailBadge.innerText = step.proto;
+            detailHeader.innerText = step.details.header;
+            detailDesc.innerHTML = step.details.desc;
+
+            // Colorize badge
+            const baseColor = step.style === 'blue' ? 'bg-blue-100 text-blue-700' : 
+                              step.style === 'purple' ? 'bg-purple-100 text-purple-700' : 
+                              'bg-emerald-100 text-emerald-700';
+            detailBadge.className = `px-2 py-1 rounded text-xs font-bold uppercase tracking-wider inline-block ${baseColor}`;
+
+            // Update Stacks
+            const maxLayer = step.layerDepth;
+            pathDesc.innerText = `Flow Height: L${maxLayer}`;
+            
+            // Reset all bricks
+            document.querySelectorAll('.layer-brick').forEach(b => {
+                b.className = 'layer-brick'; // Reset
+            });
+
+            // Highlight Logic
+            for (let i = 1; i <= 7; i++) {
+                const cBrick = document.getElementById(`c-layer-${i}`);
+                const sBrick = document.getElementById(`s-layer-${i}`);
+                
+                if (i <= maxLayer) {
+                    cBrick.classList.add('active');
+                    sBrick.classList.add('active');
+                    
+                    if (i === maxLayer) {
+                        cBrick.classList.add('top-layer');
+                        sBrick.classList.add('top-layer');
+                    }
+                }
+            }
+        }
+
+    </script>
+</body>
+</html>

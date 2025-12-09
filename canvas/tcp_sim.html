@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TCP Reliability Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .packet {
+            transition: left 2s linear;
+        }
+        .explosion {
+            animation: explode 0.5s forwards;
+        }
+        @keyframes explode {
+            0% { transform: scale(1); opacity: 1; background-color: #ef4444; }
+            50% { transform: scale(1.5); opacity: 0.8; }
+            100% { transform: scale(2); opacity: 0; }
+        }
+        .buffer-slot {
+            transition: all 0.3s;
+        }
+        .buffer-slot.received {
+            background-color: #10b981; /* Emerald 500 */
+            color: white;
+            border-color: #059669;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 p-4 shadow-sm z-10">
+        <div class="max-w-4xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                TCP Reliability Simulator
+            </h1>
+            <div class="text-sm font-medium text-slate-500">
+                Click packets to <span class="text-red-500 font-bold">DESTROY</span> them
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Game Area -->
+    <main class="flex-1 relative flex flex-col max-w-5xl mx-auto w-full p-4">
+        
+        <!-- Nodes -->
+        <div class="flex justify-between items-stretch h-64 relative mb-4">
+            
+            <!-- Sender -->
+            <div class="w-48 bg-white border-2 border-slate-300 rounded-xl p-4 flex flex-col shadow-lg z-10 relative">
+                <div class="font-bold text-center border-b pb-2 mb-2">SENDER</div>
+                <div class="text-xs text-slate-500 mb-1">Outbound Buffer</div>
+                <div id="sender-buffer" class="grid grid-cols-5 gap-1 mb-4">
+                    <!-- Buffer Slots JS -->
+                </div>
+                <div class="mt-auto text-center">
+                    <button id="start-btn" onclick="startTransmission()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
+                        Start Transmission
+                    </button>
+                </div>
+            </div>
+
+            <!-- The Network (Wire) -->
+            <div class="flex-1 relative mx-4 bg-slate-200/50 rounded-xl border-dashed border-2 border-slate-300 flex items-center justify-center overflow-hidden" id="network-zone">
+                <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <span class="text-slate-300 font-bold text-4xl opacity-50 tracking-widest">THE INTERNET</span>
+                </div>
+                <!-- Packets spawn here -->
+            </div>
+
+            <!-- Receiver -->
+            <div class="w-48 bg-white border-2 border-slate-300 rounded-xl p-4 flex flex-col shadow-lg z-10">
+                <div class="font-bold text-center border-b pb-2 mb-2">RECEIVER</div>
+                <div class="text-xs text-slate-500 mb-1">Inbound Buffer</div>
+                <div id="receiver-buffer" class="grid grid-cols-5 gap-1 mb-auto">
+                    <!-- Buffer Slots JS -->
+                </div>
+                <div class="mt-4 p-2 bg-emerald-50 rounded border border-emerald-100 text-center">
+                    <div class="text-[10px] text-emerald-600 uppercase font-bold">Next Expected Seq</div>
+                    <div id="ack-display" class="text-2xl font-mono font-bold text-emerald-700">1</div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Log Console -->
+        <div class="flex-1 bg-slate-900 rounded-xl p-4 font-mono text-sm overflow-hidden flex flex-col shadow-inner">
+            <div class="text-slate-400 text-xs uppercase tracking-wider mb-2 flex justify-between">
+                <span>Event Log</span>
+                <button onclick="clearLog()" class="hover:text-white">Clear</button>
+            </div>
+            <div id="console-log" class="flex-1 overflow-y-auto space-y-1 text-slate-300">
+                <div class="text-slate-500 italic">Waiting to start...</div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        const TOTAL_PACKETS = 10;
+        let packets = [];
+        let nextSeqToSend = 1;
+        let nextExpectedSeq = 1;
+        let activeTimeouts = {}; // Store timer IDs for each packet
+        let transmissionActive = false;
+        let acknowledged = new Set();
+
+        // Init Buffers
+        function init() {
+            const sBuf = document.getElementById('sender-buffer');
+            const rBuf = document.getElementById('receiver-buffer');
+            sBuf.innerHTML = '';
+            rBuf.innerHTML = '';
+
+            for(let i=1; i<=TOTAL_PACKETS; i++) {
+                // Sender Buffer Visuals
+                const sSlot = document.createElement('div');
+                sSlot.className = `buffer-slot h-6 w-6 border border-slate-300 rounded flex items-center justify-center text-xs font-bold text-slate-400 bg-slate-50`;
+                sSlot.id = `s-slot-${i}`;
+                sSlot.innerText = i;
+                sBuf.appendChild(sSlot);
+
+                // Receiver Buffer Visuals
+                const rSlot = document.createElement('div');
+                rSlot.className = `buffer-slot h-6 w-6 border border-slate-300 rounded flex items-center justify-center text-xs font-bold text-slate-400 bg-slate-50`;
+                rSlot.id = `r-slot-${i}`;
+                rSlot.innerText = i;
+                rBuf.appendChild(rSlot);
+            }
+        }
+
+        function log(msg, type='info') {
+            const consoleDiv = document.getElementById('console-log');
+            const line = document.createElement('div');
+            
+            if(type === 'error') line.className = "text-red-400";
+            else if(type === 'success') line.className = "text-emerald-400";
+            else if(type === 'warn') line.className = "text-amber-400";
+            else line.className = "text-slate-300";
+
+            const time = new Date().toLocaleTimeString().split(' ')[0];
+            line.innerHTML = `<span class="opacity-50">[${time}]</span> ${msg}`;
+            consoleDiv.appendChild(line);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('console-log').innerHTML = '';
+        }
+
+        function startTransmission() {
+            if(transmissionActive) return;
+            transmissionActive = true;
+            document.getElementById('start-btn').classList.add('opacity-50', 'cursor-not-allowed');
+            log("--- Transmission Started ---", 'info');
+            sendNextBatch();
+        }
+
+        function sendNextBatch() {
+            if (nextSeqToSend > TOTAL_PACKETS) return;
+            
+            // Simple logic: send one packet every 1.5 seconds if not all done
+            const interval = setInterval(() => {
+                if (nextSeqToSend <= TOTAL_PACKETS) {
+                    sendPacket(nextSeqToSend);
+                    nextSeqToSend++;
+                } else {
+                    clearInterval(interval);
+                }
+            }, 1000);
+        }
+
+        function sendPacket(seq) {
+            if (acknowledged.has(seq)) return; // Don't resend if already done (unless triggered by timeout)
+
+            log(`Sender: Sending Packet [SEQ ${seq}]`, 'info');
+            
+            // Visual Update Sender Buffer
+            const sSlot = document.getElementById(`s-slot-${seq}`);
+            if(sSlot) {
+                sSlot.classList.remove('bg-slate-50');
+                sSlot.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-700');
+            }
+
+            // Create Packet Element
+            const zone = document.getElementById('network-zone');
+            const packet = document.createElement('div');
+            packet.className = 'absolute w-12 h-8 bg-blue-500 rounded shadow-md flex items-center justify-center text-white font-bold text-sm cursor-pointer hover:bg-red-500 hover:scale-110 transition-transform z-20';
+            packet.innerText = seq;
+            packet.style.left = '0px';
+            packet.id = `pkt-${seq}-${Date.now()}`; // Unique ID for DOM
+
+            // Click to Kill
+            packet.onclick = () => {
+                killPacket(packet, seq);
+            };
+
+            zone.appendChild(packet);
+
+            // Animate
+            const zoneWidth = zone.offsetWidth - 50; // buffer for width
+            
+            // Move Logic
+            let pos = 0;
+            const speed = 2; // px per frame
+            
+            // Set Timeout (Retransmission Timer) - 4 seconds (simulation time)
+            if(activeTimeouts[seq]) clearTimeout(activeTimeouts[seq]);
+            
+            activeTimeouts[seq] = setTimeout(() => {
+                // If this runs, ACK was never received
+                if (!acknowledged.has(seq)) {
+                    log(`Sender: Timeout! Packet ${seq} ACK not received. Retransmitting...`, 'warn');
+                    // Remove the visual packet if it's still floating (ghost)
+                    if(packet.parentNode) packet.remove(); 
+                    sendPacket(seq);
+                }
+            }, 4000);
+
+            // Animation Loop
+            function move() {
+                if (!packet.parentNode) return; // Destroyed
+                pos += speed;
+                packet.style.left = pos + 'px';
+
+                if (pos >= zoneWidth) {
+                    // Arrived
+                    receivePacket(seq);
+                    packet.remove();
+                } else {
+                    requestAnimationFrame(move);
+                }
+            }
+            requestAnimationFrame(move);
+        }
+
+        function killPacket(element, seq) {
+            // Visual
+            element.classList.add('explosion');
+            element.innerText = '💥';
+            log(`Network: Packet ${seq} DESTROYED in transit!`, 'error');
+            
+            setTimeout(() => {
+                if(element.parentNode) element.remove();
+            }, 500);
+            
+            // Note: We DO NOT clear the timeout. 
+            // The sender doesn't know it exploded. 
+            // The sender is still waiting. The timeout will trigger retransmission.
+        }
+
+        function receivePacket(seq) {
+            // Receiver Logic
+            log(`Receiver: Got Packet ${seq}`, 'success');
+            
+            // Update Visual Buffer
+            const rSlot = document.getElementById(`r-slot-${seq}`);
+            rSlot.classList.add('received');
+            
+            // Send ACK (Visual only for this sim, implied logic)
+            // In real TCP, Receiver checks order. 
+            if (seq === nextExpectedSeq) {
+                nextExpectedSeq++;
+                // Check if we have consecutive packets buffered
+                while (document.getElementById(`r-slot-${nextExpectedSeq}`)?.classList.contains('received')) {
+                    nextExpectedSeq++;
+                }
+            }
+            
+            document.getElementById('ack-display').innerText = nextExpectedSeq;
+            
+            // Send ACK Packet back
+            sendAck(seq, nextExpectedSeq);
+        }
+
+        function sendAck(seqReceived, nextExpected) {
+            // Create ACK Packet
+            const zone = document.getElementById('network-zone');
+            const ack = document.createElement('div');
+            ack.className = 'absolute w-12 h-6 bg-emerald-500 rounded-full shadow-md flex items-center justify-center text-white font-bold text-xs z-20 border-2 border-white';
+            ack.innerText = `ACK ${nextExpected}`; // TCP usually ACKs the NEXT expected
+            ack.style.right = '0px'; // Start at right
+            
+            zone.appendChild(ack);
+
+            const zoneWidth = zone.offsetWidth - 50;
+            let pos = 0;
+            const speed = 3; // ACKs are fast :)
+
+            function moveAck() {
+                if (!ack.parentNode) return;
+                pos += speed;
+                ack.style.right = pos + 'px';
+
+                if (pos >= zoneWidth) {
+                    // Arrived at Sender
+                    processAck(seqReceived);
+                    ack.remove();
+                } else {
+                    requestAnimationFrame(moveAck);
+                }
+            }
+            requestAnimationFrame(moveAck);
+        }
+
+        function processAck(seqAcked) {
+            if (acknowledged.has(seqAcked)) return;
+            
+            log(`Sender: Received ACK for ${seqAcked}. Marked safe.`, 'success');
+            acknowledged.add(seqAcked);
+            
+            // Clear Timeout
+            if(activeTimeouts[seqAcked]) {
+                clearTimeout(activeTimeouts[seqAcked]);
+                delete activeTimeouts[seqAcked];
+            }
+
+            // Update Sender Buffer Visual (Green for safe)
+            const sSlot = document.getElementById(`s-slot-${seqAcked}`);
+            sSlot.classList.remove('bg-blue-100', 'text-blue-700', 'border-blue-400');
+            sSlot.classList.add('bg-emerald-100', 'text-emerald-700', 'border-emerald-400');
+        }
+
+        init();
+
+    </script>
+</body>
+</html>

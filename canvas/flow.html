@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connection Sequence: TCP & TLS Flow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        
+        /* Timeline Lines */
+        .timeline-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: #e2e8f0;
+            z-index: 0;
+        }
+        
+        /* Message Arrow Styling */
+        .message-arrow {
+            position: relative;
+            height: 2px;
+            background: #94a3b8;
+            transition: all 0.3s ease;
+        }
+        .message-arrow::after {
+            content: '';
+            position: absolute;
+            top: -4px;
+            width: 0; 
+            height: 0; 
+            border-top: 5px solid transparent;
+            border-bottom: 5px solid transparent;
+        }
+        /* Right pointing arrow */
+        .arrow-right::after {
+            right: 0;
+            border-left: 8px solid #94a3b8;
+        }
+        /* Left pointing arrow */
+        .arrow-left::after {
+            left: 0;
+            border-right: 8px solid #94a3b8;
+        }
+
+        /* Hover Effects */
+        .step-container:hover .message-arrow { background: #3b82f6; height: 3px; }
+        .step-container:hover .arrow-right::after { border-left-color: #3b82f6; }
+        .step-container:hover .arrow-left::after { border-right-color: #3b82f6; }
+        .step-container:hover .step-card { border-color: #3b82f6; transform: scale(1.02); }
+        .step-container:hover .step-label { color: #1d4ed8; font-weight: bold; }
+
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white border-b border-slate-200 p-4 flex-none z-20 shadow-sm">
+        <div class="max-w-5xl mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                Connection Flow Visualizer
+            </h1>
+            <div class="flex gap-4 text-sm font-medium">
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-blue-500"></span> TCP</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-purple-500"></span> TLS/SSL</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-emerald-500"></span> HTTP Data</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Diagram -->
+    <main class="flex-1 overflow-y-auto p-8 relative">
+        <div class="max-w-5xl mx-auto relative min-h-[1000px]">
+            
+            <!-- Columns (Client / Server) -->
+            <div class="flex justify-between font-bold text-lg mb-8 sticky top-0 bg-slate-50 z-10 py-2 border-b border-slate-200">
+                <div class="w-1/3 text-center flex flex-col items-center">
+                    <div class="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mb-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+                    </div>
+                    Client
+                </div>
+                <div class="w-1/3 text-center flex flex-col items-center">
+                    <div class="w-12 h-12 bg-slate-200 rounded-full flex items-center justify-center mb-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-slate-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
+                    </div>
+                    Server
+                </div>
+            </div>
+
+            <!-- Vertical Timeline Lines -->
+            <div class="absolute top-24 bottom-0 left-[16.6%] timeline-line"></div>
+            <div class="absolute top-24 bottom-0 right-[16.6%] timeline-line"></div>
+
+            <!-- Phases -->
+            <div id="flow-container" class="space-y-12 mt-8 pb-20">
+                <!-- Javascript will inject steps here -->
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Details Panel (Fixed Bottom) -->
+    <footer id="detail-panel" class="bg-white border-t border-slate-200 p-6 fixed bottom-0 left-0 right-0 h-48 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] transform translate-y-full transition-transform duration-300">
+        <div class="max-w-5xl mx-auto flex gap-8 h-full">
+            <div class="w-1/4 border-r border-slate-100 pr-4">
+                <h3 id="detail-title" class="font-bold text-lg text-slate-800 mb-1">Step Title</h3>
+                <span id="detail-badge" class="px-2 py-1 rounded text-xs font-bold uppercase tracking-wider bg-slate-100 text-slate-600">Protocol</span>
+            </div>
+            <div class="flex-1 flex gap-8">
+                <div class="flex-1">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase mb-2">Header Details</h4>
+                    <pre id="detail-header" class="font-mono text-sm text-slate-600 bg-slate-50 p-3 rounded border border-slate-200 overflow-auto h-24">Select a step...</pre>
+                </div>
+                <div class="flex-1">
+                    <h4 class="text-xs font-bold text-slate-400 uppercase mb-2">Explanation</h4>
+                    <p id="detail-desc" class="text-sm text-slate-600 leading-relaxed">Hover over any step in the diagram to see what is happening at the packet level.</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        // --- DATA DEFINITION ---
+        const steps = [
+            // --- PHASE 1: TCP ---
+            {
+                type: 'phase',
+                label: 'PHASE 1: TCP Handshake (Connection Establishment)',
+                color: 'text-blue-500 bg-blue-50 border-blue-100'
+            },
+            {
+                id: 1,
+                proto: 'TCP',
+                name: 'SYN',
+                from: 'Client',
+                to: 'Server',
+                style: 'blue',
+                details: {
+                    header: "Flags: [SYN]\nSeq: 0\nAck: 0\nWindow: 65535",
+                    desc: "<b>Synchronize:</b> The Client sends a random Sequence Number (0) to start the conversation. It's asking: 'Is anyone home?'"
+                }
+            },
+            {
+                id: 2,
+                proto: 'TCP',
+                name: 'SYN, ACK',
+                from: 'Server',
+                to: 'Client',
+                style: 'blue',
+                details: {
+                    header: "Flags: [SYN, ACK]\nSeq: 0\nAck: 1 (ClientSeq + 1)",
+                    desc: "<b>Sync + Acknowledge:</b> The Server hears the client. It acknowledges the Client's Seq (0 -> 1) and sends its own random Seq (0)."
+                }
+            },
+            {
+                id: 3,
+                proto: 'TCP',
+                name: 'ACK',
+                from: 'Client',
+                to: 'Server',
+                style: 'blue',
+                details: {
+                    header: "Flags: [ACK]\nSeq: 1\nAck: 1 (ServerSeq + 1)",
+                    desc: "<b>Acknowledge:</b> The Client confirms it received the Server's Seq. The Logical Connection is now ESTABLISHED."
+                }
+            },
+
+            // --- PHASE 2: TLS ---
+            {
+                type: 'phase',
+                label: 'PHASE 2: TLS Handshake (Security Negotiation)',
+                color: 'text-purple-500 bg-purple-50 border-purple-100'
+            },
+            {
+                id: 4,
+                proto: 'TLS 1.2/1.3',
+                name: 'Client Hello',
+                from: 'Client',
+                to: 'Server',
+                style: 'purple',
+                details: {
+                    header: "Version: TLS 1.2\nCipher Suites: [TLS_AES_256...]\nRandom: 0x8F2A...",
+                    desc: "The Client sends a list of encryption languages (Ciphers) it speaks and a random number used to generate keys later."
+                }
+            },
+            {
+                id: 5,
+                proto: 'TLS 1.2/1.3',
+                name: 'Server Hello + Certificate',
+                from: 'Server',
+                to: 'Client',
+                style: 'purple',
+                details: {
+                    header: "Selected Cipher: TLS_AES_256_GCM\nCertificate: *.google.com\nPublic Key: [RSA 2048]",
+                    desc: "The Server picks the best Cipher. It sends its Digital ID Card (Certificate) containing its Public Key to prove its identity."
+                }
+            },
+            {
+                id: 6,
+                proto: 'TLS 1.2/1.3',
+                name: 'Client Key Exchange + Change Cipher',
+                from: 'Client',
+                to: 'Server',
+                style: 'purple',
+                details: {
+                    header: "Pre-Master Secret: [Encrypted with Server Public Key]\nMsg: Change Cipher Spec",
+                    desc: "The Client creates a secret password (Pre-Master Secret), locks it with the Server's Public Key, and sends it. Only the Server can unlock it."
+                }
+            },
+            {
+                id: 7,
+                proto: 'TLS 1.2/1.3',
+                name: 'Finished',
+                from: 'Server',
+                to: 'Client',
+                style: 'purple',
+                details: {
+                    header: "Encrypted Handshake Message\nVerify Data: [Hash]",
+                    desc: "Both sides now have the same 'Session Key'. The Server sends a test message encrypted with this key. If the Client can read it, the tunnel is secure."
+                }
+            },
+
+            // --- PHASE 3: HTTP ---
+            {
+                type: 'phase',
+                label: 'PHASE 3: Application Data (Encrypted Tunnel)',
+                color: 'text-emerald-600 bg-emerald-50 border-emerald-100'
+            },
+            {
+                id: 8,
+                proto: 'HTTP / TLS',
+                name: 'GET /index.html',
+                from: 'Client',
+                to: 'Server',
+                style: 'emerald',
+                details: {
+                    header: "[ TLS Record Header ]\nPayload: *Encrypted Gibberish*\n(Inside: GET / HTTP/1.1)",
+                    desc: "The Client sends the HTTP Request. To an outsider, this looks like random noise. Only the Server has the key to turn it back into 'GET /'."
+                }
+            },
+            {
+                id: 9,
+                proto: 'HTTP / TLS',
+                name: 'HTTP 200 OK (Data)',
+                from: 'Server',
+                to: 'Client',
+                style: 'emerald',
+                details: {
+                    header: "[ TLS Record Header ]\nPayload: *Encrypted Gibberish*\n(Inside: <html><body>...)",
+                    desc: "The Server sends the website content. Again, it flows through the internet as encrypted noise, protecting your data."
+                }
+            }
+        ];
+
+        // --- RENDER LOGIC ---
+        const container = document.getElementById('flow-container');
+        const detailPanel = document.getElementById('detail-panel');
+        const detailTitle = document.getElementById('detail-title');
+        const detailBadge = document.getElementById('detail-badge');
+        const detailHeader = document.getElementById('detail-header');
+        const detailDesc = document.getElementById('detail-desc');
+
+        steps.forEach(step => {
+            if (step.type === 'phase') {
+                const div = document.createElement('div');
+                div.className = `text-center py-2 px-4 mx-auto w-fit rounded-full text-xs font-bold uppercase tracking-widest border ${step.color}`;
+                div.innerText = step.label;
+                container.appendChild(div);
+                return;
+            }
+
+            const isRight = step.from === 'Client';
+            const arrowClass = isRight ? 'arrow-right' : 'arrow-left';
+            const alignClass = isRight ? 'flex-row' : 'flex-row-reverse';
+            const colorClass = step.style === 'blue' ? 'bg-blue-100 text-blue-800 border-blue-200' :
+                             step.style === 'purple' ? 'bg-purple-100 text-purple-800 border-purple-200' : 
+                             'bg-emerald-100 text-emerald-800 border-emerald-200';
+
+            const row = document.createElement('div');
+            row.className = `step-container flex ${alignClass} items-center justify-between px-[16.6%] relative cursor-pointer group`;
+            
+            row.innerHTML = `
+                <div class="w-5/12"></div> <!-- Spacer -->
+                
+                <div class="w-full relative px-4">
+                    <div class="absolute top-1/2 left-0 right-0 -translate-y-1/2">
+                        <div class="message-arrow ${arrowClass}"></div>
+                    </div>
+                    <div class="relative z-10 text-center">
+                        <span class="step-card inline-block px-3 py-1.5 bg-white border border-slate-200 rounded shadow-sm text-xs font-mono text-slate-500 transition-all duration-200 ${colorClass}">
+                            ${step.name}
+                        </span>
+                    </div>
+                </div>
+
+                <div class="w-5/12"></div> <!-- Spacer -->
+            `;
+
+            // Hover Events
+            row.addEventListener('mouseenter', () => showDetails(step));
+            // row.addEventListener('mouseleave', hideDetails);
+
+            container.appendChild(row);
+        });
+
+        function showDetails(step) {
+            detailPanel.classList.remove('translate-y-full');
+            
+            detailTitle.innerText = step.name;
+            detailBadge.innerText = step.proto;
+            detailHeader.innerText = step.details.header;
+            detailDesc.innerHTML = step.details.desc;
+
+            // Colorize badge
+            detailBadge.className = `px-2 py-1 rounded text-xs font-bold uppercase tracking-wider ${
+                step.style === 'blue' ? 'bg-blue-100 text-blue-700' : 
+                step.style === 'purple' ? 'bg-purple-100 text-purple-700' : 
+                'bg-emerald-100 text-emerald-700'
+            }`;
+        }
+
+    </script>
+</body>
+</html>

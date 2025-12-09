@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Protocol Inspector</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+        .layer-btn { transition: all 0.2s; }
+        .layer-btn:hover { transform: translateX(4px); }
+        .layer-btn.active { border-left-width: 6px; background-color: #f0f9ff; }
+        
+        /* Bitstream Animation */
+        @keyframes flow {
+            0% { background-position: 0 0; }
+            100% { background-position: 20px 20px; }
+        }
+        .wire-pattern {
+            background-image: radial-gradient(#cbd5e1 15%, transparent 16%);
+            background-size: 10px 10px;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-slate-900 text-white p-4 shadow-lg flex-none z-10">
+        <div class="max-w-7xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-blue-600 rounded-lg">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h20"/><path d="M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-6"/><path d="M12 12V2"/><path d="M12 2 8 6"/><path d="M12 2l4 4"/></svg>
+                </div>
+                <div>
+                    <h1 class="font-bold text-xl tracking-tight">NetInspect <span class="text-blue-400">Pro</span></h1>
+                    <p class="text-xs text-slate-400">Deep Dive Protocol Analyzer</p>
+                </div>
+            </div>
+            <div class="text-sm bg-slate-800 px-3 py-1 rounded-full text-slate-300 border border-slate-700">
+                Mode: <span class="text-green-400 font-mono">Encapsulation (Sender)</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 max-w-7xl mx-auto w-full flex overflow-hidden">
+        
+        <!-- Left: The Stack -->
+        <aside class="w-1/3 md:w-1/4 bg-white border-r border-slate-200 flex flex-col h-full shadow-lg z-0">
+            <div class="p-4 bg-slate-50 border-b border-slate-200">
+                <h2 class="font-bold text-slate-700 uppercase text-xs tracking-wider">The OSI Stack</h2>
+            </div>
+            <div id="stack-container" class="flex-1 overflow-y-auto p-2 space-y-2">
+                <!-- Stack Items Injected by JS -->
+            </div>
+        </aside>
+
+        <!-- Right: Inspector Panel -->
+        <section class="flex-1 flex flex-col h-full bg-slate-50 relative">
+            
+            <!-- Default Empty State -->
+            <div id="empty-state" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 p-8 text-center z-0">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-24 h-24 mb-4 opacity-20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/><line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/></svg>
+                <h3 class="text-xl font-bold text-slate-600">Select a Layer</h3>
+                <p class="max-w-md mt-2">Click a layer on the left to inspect the specific protocols, headers, and data transformations occurring at that stage.</p>
+            </div>
+
+            <!-- Content Panel (Hidden by default) -->
+            <div id="inspector-content" class="hidden flex-col h-full z-10 bg-slate-50">
+                
+                <!-- Protocol Header Visualizer (Top) -->
+                <div class="h-1/3 min-h-[250px] bg-slate-900 text-emerald-400 p-6 overflow-y-auto font-mono text-sm border-b border-slate-700 shadow-inner relative">
+                    <div class="absolute top-2 right-2 text-xs text-slate-500 uppercase tracking-widest border border-slate-700 px-2 py-1 rounded">Packet Anatomy</div>
+                    <div id="packet-visualizer" class="space-y-4">
+                        <!-- Hex/Header Visualization -->
+                    </div>
+                </div>
+
+                <!-- Tabs -->
+                <div class="flex border-b border-slate-200 bg-white sticky top-0">
+                    <button onclick="switchTab('protocol')" class="tab-btn active px-6 py-3 text-sm font-medium text-blue-600 border-b-2 border-blue-600">Protocol Mechanics</button>
+                    <button onclick="switchTab('transformation')" class="tab-btn px-6 py-3 text-sm font-medium text-slate-500 hover:text-slate-800">Data Transformation</button>
+                </div>
+
+                <!-- Tab Content -->
+                <div class="flex-1 overflow-y-auto p-6 md:p-8 bg-white" id="tab-container">
+                    <!-- Dynamic Content -->
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <script>
+        // --- DATA ---
+        const layers = [
+            {
+                id: 7,
+                name: "Application",
+                protocol: "HTTP / HTTPS",
+                desc: "User Interaction & Data Generation",
+                color: "border-rose-500 text-rose-700 bg-rose-50",
+                details: {
+                    protocol: {
+                        name: "HTTP (Hypertext Transfer Protocol)",
+                        role: "Defines the format of messages (requests and responses).",
+                        mechanics: [
+                            "<b>Client-Server Model:</b> Your browser (Client) sends a request to the server.",
+                            "<b>Stateless:</b> By default, the server doesn't remember you (Cookies/Sessions fix this).",
+                            "<b>Verbs:</b> GET (Read), POST (Create), PUT (Update), DELETE (Remove)."
+                        ],
+                        example: "POST /login HTTP/1.1"
+                    },
+                    packet: {
+                        title: "HTTP Payload",
+                        code: `
+POST /auth/login HTTP/1.1
+Host: www.bank.com
+Content-Type: application/json
+Content-Length: 45
+
+{
+  "user": "alice",
+  "pass": "s3cr3t!"
+}`
+                    },
+                    transformation: {
+                        from: "User Click 'Login'",
+                        to: "JSON String",
+                        process: "The browser takes form inputs and serializes them into a JSON string formatted inside an HTTP body."
+                    }
+                }
+            },
+            {
+                id: 6,
+                name: "Presentation",
+                protocol: "TLS / SSL",
+                desc: "Encryption & Formatting",
+                color: "border-purple-500 text-purple-700 bg-purple-50",
+                details: {
+                    protocol: {
+                        name: "TLS (Transport Layer Security)",
+                        role: "Encrypts data to ensure privacy and integrity.",
+                        mechanics: [
+                            "<b>Handshake:</b> Client and Server agree on a cipher suite (algorithm) and exchange keys.",
+                            "<b>Symmetric Encryption:</b> Once connected, they use a shared key (fast) to encrypt data.",
+                            "<b>Certificates:</b> The server proves its identity using a Certificate Authority (CA)."
+                        ],
+                        example: "TLS 1.3 Handshake"
+                    },
+                    packet: {
+                        title: "Encrypted Payload (Ciphertext)",
+                        code: `
+[ TLS Record Layer ]
+Content Type: Application Data (23)
+Version: TLS 1.2 (0x0303)
+Length: 64
+Encrypted Data: 
+  a3 f1 9c 2d 5b 8e 10 ... (Unreadable)
+`
+                    },
+                    transformation: {
+                        from: "Plaintext HTTP",
+                        to: "Ciphertext (Gibberish)",
+                        process: "The HTTP message is fed into an encryption algorithm (like AES) using the Session Key. The output is unreadable without the key."
+                    }
+                }
+            },
+            {
+                id: 5,
+                name: "Session",
+                protocol: "Session RPC",
+                desc: "Dialog Control",
+                color: "border-indigo-500 text-indigo-700 bg-indigo-50",
+                details: {
+                    protocol: {
+                        name: "Session Management",
+                        role: "Keeps different application data streams separate.",
+                        mechanics: [
+                            "<b>Tokens:</b> Adds authentication tokens or session IDs so the server knows 'who' is asking.",
+                            "<b>Checkpoints:</b> Can recover long downloads if interrupted.",
+                            "<b>Management:</b> Establishes, maintains, and terminates the connection."
+                        ],
+                        example: "NetBIOS / Session Tokens"
+                    },
+                    packet: {
+                        title: "Session Header Injection",
+                        code: `
+[ Session Header ]
+Session ID: 0x8F2A11
+Sequence: 1
+State: Active
+`
+                    },
+                    transformation: {
+                        from: "Raw Data",
+                        to: "Tagged Data",
+                        process: "Adds a 'Session ID' tag. Think of it like a waiter remembering which table ordered which dish in a busy restaurant."
+                    }
+                }
+            },
+            {
+                id: 4,
+                name: "Transport",
+                protocol: "TCP / UDP",
+                desc: "Reliability & Segmentation",
+                color: "border-blue-500 text-blue-700 bg-blue-50",
+                details: {
+                    protocol: {
+                        name: "TCP (Transmission Control Protocol)",
+                        role: "Guarantees delivery and correct order.",
+                        mechanics: [
+                            "<b>Segmentation:</b> Breaks big data into smaller chunks (Segments).",
+                            "<b>3-Way Handshake:</b> SYN -> SYN-ACK -> ACK (The setup).",
+                            "<b>Flow Control:</b> 'Windowing' prevents overwhelming the receiver.",
+                            "<b>Error Recovery:</b> If a segment is missing, TCP asks for it again."
+                        ],
+                        example: "Source Port: 51234 -> Dest Port: 443"
+                    },
+                    packet: {
+                        title: "TCP Segment Header",
+                        code: `
+[ TCP Header (20 Bytes) ]
+Source Port: 51234     | Dest Port: 443
+Sequence Num: 101      | Ack Num: 0
+Header Len: 5          | Flags: [PSH, ACK]
+Window Size: 65535     | Checksum: 0xA1B2
+-----------------------------------------
+[ Payload (Encrypted Data Chunk) ]
+`
+                    },
+                    transformation: {
+                        from: "Large Data Stream",
+                        to: "Numbered Segments",
+                        process: "The encrypted file is chopped into pieces (MSS, usually 1460 bytes). Each piece gets a 'Sequence Number' so it can be rebuilt."
+                    }
+                }
+            },
+            {
+                id: 3,
+                name: "Network",
+                protocol: "IP (Internet Protocol)",
+                desc: "Routing & Addressing",
+                color: "border-emerald-500 text-emerald-700 bg-emerald-50",
+                details: {
+                    protocol: {
+                        name: "IPv4 (Internet Protocol)",
+                        role: "Moves data between different networks (The Internet).",
+                        mechanics: [
+                            "<b>Addressing:</b> Uses IP Addresses (e.g., 192.168.1.1) to identify devices.",
+                            "<b>Routing:</b> Routers look at the Dest IP to decide the 'Next Hop'.",
+                            "<b>TTL (Time To Live):</b> Prevents infinite loops. Decreases by 1 at every router."
+                        ],
+                        example: "192.168.1.5 -> 142.250.1.1"
+                    },
+                    packet: {
+                        title: "IP Packet Header",
+                        code: `
+[ IPv4 Header (20 Bytes) ]
+Version: 4             | IHL: 5
+Total Length: 1500     | ID: 54321
+TTL: 64                | Protocol: 6 (TCP)
+Source IP: 192.168.1.5
+Dest IP:   142.250.190.46
+-----------------------------------------
+[ TCP Segment (Data) ]
+`
+                    },
+                    transformation: {
+                        from: "Segment",
+                        to: "Packet",
+                        process: "Encapsulates the TCP Segment inside an IP envelope. This is the only layer that handles 'End-to-End' addressing across the world."
+                    }
+                }
+            },
+            {
+                id: 2,
+                name: "Data Link",
+                protocol: "Ethernet",
+                desc: "Physical Addressing",
+                color: "border-amber-500 text-amber-700 bg-amber-50",
+                details: {
+                    protocol: {
+                        name: "Ethernet II",
+                        role: "Moves data between devices on the SAME network.",
+                        mechanics: [
+                            "<b>MAC Addresses:</b> Unique hardware ID burned into the network card (e.g., AA:BB:CC...).",
+                            "<b>ARP (Address Resolution Protocol):</b> 'Who has IP 192.168.1.1?' -> 'MAC AA:BB has it'.",
+                            "<b>FCS (Check Sequence):</b> Mathematical check to ensure no bits were corrupted."
+                        ],
+                        example: "MAC AA:BB:CC -> MAC DD:EE:FF"
+                    },
+                    packet: {
+                        title: "Ethernet Frame",
+                        code: `
+[ Ethernet Header (14 Bytes) ]
+Dest MAC:   00:0C:29:1A:2B:3C (Router)
+Source MAC: A4:B1:C2:D3:E4:F5 (Your PC)
+EtherType:  0x0800 (IPv4)
+-----------------------------------------
+[ IP Packet ]
+-----------------------------------------
+[ FCS Trailer (4 Bytes) ]
+`
+                    },
+                    transformation: {
+                        from: "Packet",
+                        to: "Frame",
+                        process: "The Packet is put inside a Frame. The Destination MAC is NOT the final web server, but the Gateway (Router) in your house."
+                    }
+                }
+            },
+            {
+                id: 1,
+                name: "Physical",
+                protocol: "802.3 / 802.11",
+                desc: "Bits & Signals",
+                color: "border-slate-500 text-slate-700 bg-slate-50",
+                details: {
+                    protocol: {
+                        name: "Physical Transmission",
+                        role: "Transmits raw bits over a physical medium.",
+                        mechanics: [
+                            "<b>Modulation:</b> Converting bits (1/0) into analog waves (Wi-Fi) or voltage changes (Cable).",
+                            "<b>Encoding:</b> Manchester or NRZ encoding to sync clocks.",
+                            "<b>Medium:</b> Copper (Electricity), Fiber (Light), RF (Radio)."
+                        ],
+                        example: "Voltage High (+5V) / Low (0V)"
+                    },
+                    packet: {
+                        title: "Bit Stream",
+                        code: `
+01010101 01010101 (Preamble)
+10101011 (SFD)
+11000101 10101010 11110000 ...
+`
+                    },
+                    transformation: {
+                        from: "Frame",
+                        to: "Signals",
+                        process: "The Frame is serialized into a continuous stream of electrical or radio pulses sent out of the Network Interface Card (NIC)."
+                    }
+                }
+            }
+        ];
+
+        let currentLayer = null;
+
+        // --- RENDER FUNCTIONS ---
+        
+        function initStack() {
+            const container = document.getElementById('stack-container');
+            layers.forEach(layer => {
+                const btn = document.createElement('div');
+                btn.className = `layer-btn cursor-pointer p-4 border-l-4 border-slate-200 bg-white hover:bg-slate-50 mb-2 rounded shadow-sm group`;
+                btn.onclick = () => selectLayer(layer);
+                btn.id = `layer-${layer.id}`;
+                
+                btn.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <span class="font-mono text-sm font-bold text-slate-300 group-hover:text-slate-500">L${layer.id}</span>
+                            <div>
+                                <h3 class="font-bold text-slate-800">${layer.name}</h3>
+                                <p class="text-xs text-slate-500">${layer.protocol}</p>
+                            </div>
+                        </div>
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-slate-300 opacity-0 group-hover:opacity-100 transition-opacity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"/></svg>
+                    </div>
+                `;
+                container.appendChild(btn);
+            });
+        }
+
+        function selectLayer(layer) {
+            currentLayer = layer;
+            
+            // UI Updates
+            document.querySelectorAll('.layer-btn').forEach(b => {
+                b.classList.remove('active', layer.color.split(' ')[0], layer.color.split(' ')[2]);
+                b.classList.add('border-slate-200', 'bg-white');
+            });
+            
+            const activeBtn = document.getElementById(`layer-${layer.id}`);
+            activeBtn.classList.remove('border-slate-200', 'bg-white');
+            activeBtn.classList.add('active', layer.color.split(' ')[0], layer.color.split(' ')[2]);
+
+            document.getElementById('empty-state').classList.add('hidden');
+            document.getElementById('inspector-content').classList.remove('hidden');
+            document.getElementById('inspector-content').classList.add('flex');
+
+            // Render Packet Visualizer (Top Box)
+            const packetBox = document.getElementById('packet-visualizer');
+            packetBox.innerHTML = `
+                <div class="font-bold text-emerald-500 mb-1 border-b border-emerald-900 pb-1">${layer.details.packet.title}</div>
+                <pre class="whitespace-pre-wrap leading-relaxed opacity-90">${layer.details.packet.code}</pre>
+            `;
+
+            // Reset Tab
+            switchTab('protocol');
+        }
+
+        function switchTab(tabName) {
+            // Tab Styling
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.remove('text-blue-600', 'border-b-2', 'border-blue-600');
+                btn.classList.add('text-slate-500');
+            });
+            event.target.classList.remove('text-slate-500');
+            event.target.classList.add('text-blue-600', 'border-b-2', 'border-blue-600');
+
+            const container = document.getElementById('tab-container');
+            
+            if (!currentLayer) return;
+
+            if (tabName === 'protocol') {
+                const proto = currentLayer.details.protocol;
+                container.innerHTML = `
+                    <div class="space-y-6 animate-fade-in">
+                        <div>
+                            <h2 class="text-2xl font-bold text-slate-800 mb-1">${proto.name}</h2>
+                            <p class="text-slate-600 text-lg">${proto.role}</p>
+                        </div>
+                        
+                        <div class="bg-blue-50 border border-blue-100 rounded-lg p-5">
+                            <h3 class="font-bold text-blue-800 mb-3 text-sm uppercase tracking-wide">Core Mechanics</h3>
+                            <ul class="space-y-3">
+                                ${proto.mechanics.map(m => `<li class="flex items-start gap-2 text-slate-700"><span class="text-blue-500 mt-1">●</span> <span>${m}</span></li>`).join('')}
+                            </ul>
+                        </div>
+
+                        <div>
+                            <h3 class="font-bold text-slate-800 mb-2">Example</h3>
+                            <div class="font-mono text-sm bg-slate-800 text-slate-200 p-3 rounded border-l-4 border-emerald-500">
+                                ${proto.example}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            } else if (tabName === 'transformation') {
+                const trans = currentLayer.details.transformation;
+                container.innerHTML = `
+                    <div class="space-y-8 animate-fade-in">
+                        <div class="flex items-center justify-between text-center">
+                            <div class="flex-1">
+                                <div class="font-bold text-slate-400 text-xs uppercase mb-1">Input</div>
+                                <div class="bg-white border border-slate-200 p-3 rounded font-semibold text-slate-600 shadow-sm">${trans.from}</div>
+                            </div>
+                            <div class="px-4 text-blue-500">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 animate-pulse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                            </div>
+                            <div class="flex-1">
+                                <div class="font-bold text-slate-400 text-xs uppercase mb-1">Output</div>
+                                <div class="bg-emerald-50 border border-emerald-200 p-3 rounded font-semibold text-emerald-700 shadow-sm">${trans.to}</div>
+                            </div>
+                        </div>
+
+                        <div class="bg-slate-50 p-5 rounded-lg border border-slate-200">
+                            <h3 class="font-bold text-slate-800 mb-2">The Process</h3>
+                            <p class="text-slate-600 leading-relaxed">${trans.process}</p>
+                        </div>
+                        
+                        <div class="mt-4 p-4 bg-amber-50 border border-amber-100 rounded text-sm text-amber-800 flex gap-3">
+                             <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                             <p>At the receiver's end, this entire process happens in reverse (Decapsulation).</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // Init
+        initStack();
+
+    </script>
+</body>
+</html>
