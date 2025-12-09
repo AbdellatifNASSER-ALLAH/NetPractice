@@ -3,328 +3,613 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TCP Reliability Simulator</title>
+    <title>TCP Time-Travel Debugger</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body { font-family: 'Inter', system-ui, sans-serif; }
-        .packet {
-            transition: left 2s linear;
+        
+        /* Custom Range Slider */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
         }
-        .explosion {
-            animation: explode 0.5s forwards;
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.2);
         }
-        @keyframes explode {
-            0% { transform: scale(1); opacity: 1; background-color: #ef4444; }
-            50% { transform: scale(1.5); opacity: 0.8; }
-            100% { transform: scale(2); opacity: 0; }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #e2e8f0;
+            border-radius: 2px;
         }
-        .buffer-slot {
-            transition: all 0.3s;
+
+        /* Layer Styles */
+        .layer-box {
+            transition: all 0.1s; /* Fast transition for scrubbing */
         }
-        .buffer-slot.received {
-            background-color: #10b981; /* Emerald 500 */
+        .layer-active {
+            background-color: #3b82f6;
             color: white;
-            border-color: #059669;
+            transform: scale(1.05);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            border-color: #2563eb;
         }
+
+        /* Packet */
+        .packet-node {
+            transition: left 0.1s linear, right 0.1s linear, opacity 0.2s;
+        }
+        
+        /* PDU Headers */
+        .pdu-block { border-left: 3px solid; margin-bottom: 6px; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.05); border-radius: 0 4px 4px 0; }
+        .pdu-label { font-size: 9px; font-weight: 700; text-transform: uppercase; padding: 3px 8px; color: #64748b; display: flex; justify-content: space-between; }
+        .pdu-data { font-family: 'Menlo', 'Monaco', monospace; font-size: 10px; padding: 6px 8px; color: #334155; line-height: 1.4; border-top: 1px solid #f1f5f9; }
+        
+        /* Logic Box */
+        .logic-note { font-size: 10px; background: #fffbeb; border: 1px solid #fcd34d; padding: 6px; border-radius: 4px; color: #92400e; margin-top: 8px; }
+        .logic-note strong { font-weight: 800; display: block; margin-bottom: 2px; }
     </style>
 </head>
-<body class="bg-slate-100 text-slate-800 h-screen flex flex-col overflow-hidden">
+<body class="bg-slate-50 text-slate-800 h-screen flex flex-col overflow-hidden">
 
-    <!-- Header -->
-    <header class="bg-white border-b border-slate-200 p-4 shadow-sm z-10">
-        <div class="max-w-4xl mx-auto flex justify-between items-center">
-            <h1 class="text-xl font-bold text-slate-800 flex items-center gap-2">
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-blue-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                TCP Reliability Simulator
-            </h1>
-            <div class="text-sm font-medium text-slate-500">
-                Click packets to <span class="text-red-500 font-bold">DESTROY</span> them
+    <!-- Top Bar -->
+    <header class="bg-white border-b border-slate-200 p-3 shadow-sm z-20 flex justify-between items-center">
+        <div class="flex items-center gap-3">
+            <div class="bg-blue-600 text-white p-1.5 rounded">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20"/><path d="M2 12h20"/><path d="m2 12 5-5"/><path d="m2 12 5 5"/></svg>
             </div>
+            <div>
+                <h1 class="font-bold text-slate-800 leading-tight">TCP Time-Travel Debugger</h1>
+                <p class="text-[10px] text-slate-500 font-medium">Full-State Control & Inspection</p>
+            </div>
+        </div>
+
+        <div class="flex gap-2">
+            <button onclick="tcpDebugger.generatePhase('handshake')" class="px-3 py-1.5 bg-blue-100 text-blue-700 text-xs font-bold rounded hover:bg-blue-200 transition-colors">1. Handshake</button>
+            <button onclick="tcpDebugger.generatePhase('data')" class="px-3 py-1.5 bg-emerald-100 text-emerald-700 text-xs font-bold rounded hover:bg-emerald-200 transition-colors">2. Send Data</button>
+            <button onclick="tcpDebugger.generatePhase('teardown')" class="px-3 py-1.5 bg-rose-100 text-rose-700 text-xs font-bold rounded hover:bg-rose-200 transition-colors">3. Teardown</button>
         </div>
     </header>
 
-    <!-- Main Game Area -->
-    <main class="flex-1 relative flex flex-col max-w-5xl mx-auto w-full p-4">
+    <!-- Main Workspace -->
+    <div class="flex-1 flex overflow-hidden">
         
-        <!-- Nodes -->
-        <div class="flex justify-between items-stretch h-64 relative mb-4">
+        <!-- Left: Visualization -->
+        <main class="flex-1 relative flex flex-col bg-slate-100/50">
             
-            <!-- Sender -->
-            <div class="w-48 bg-white border-2 border-slate-300 rounded-xl p-4 flex flex-col shadow-lg z-10 relative">
-                <div class="font-bold text-center border-b pb-2 mb-2">SENDER</div>
-                <div class="text-xs text-slate-500 mb-1">Outbound Buffer</div>
-                <div id="sender-buffer" class="grid grid-cols-5 gap-1 mb-4">
-                    <!-- Buffer Slots JS -->
+            <!-- Nodes Container -->
+            <div class="flex-1 flex items-center justify-center p-8">
+                <div class="w-full max-w-4xl flex justify-between items-stretch h-80 relative">
+                    
+                    <!-- CLIENT -->
+                    <div class="w-64 bg-white rounded-xl shadow-lg border border-slate-200 flex flex-col p-4 relative z-10">
+                        <div class="flex justify-between items-center border-b pb-2 mb-4">
+                            <span class="font-bold text-sm text-slate-700">CLIENT</span>
+                            <span id="c-state" class="text-[10px] font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-500">CLOSED</span>
+                        </div>
+                        
+                        <div class="flex flex-1 gap-4">
+                            <!-- Stack -->
+                            <div class="w-16 flex flex-col gap-1 justify-center">
+                                <div id="c-layer-7" class="layer-box border border-slate-200 bg-slate-50 rounded text-[9px] text-center py-1 text-slate-400 font-mono">APP</div>
+                                <div id="c-layer-4" class="layer-box border border-slate-200 bg-slate-50 rounded text-[9px] text-center py-1 text-slate-400 font-mono">TCP</div>
+                                <div id="c-layer-3" class="layer-box border border-slate-200 bg-slate-50 rounded text-[9px] text-center py-1 text-slate-400 font-mono">IP</div>
+                                <div id="c-layer-2" class="layer-box border border-slate-200 bg-slate-50 rounded text-[9px] text-center py-1 text-slate-400 font-mono">LINK</div>
+                            </div>
+                            <!-- State Info -->
+                            <div class="flex-1 flex flex-col justify-end text-xs font-mono text-slate-500 space-y-1">
+                                <div class="bg-slate-50 p-2 rounded border border-slate-100 mb-2">
+                                    <div class="text-[9px] uppercase font-bold text-slate-400 mb-1">Network Config</div>
+                                    <div>IP: 192.168.1.5</div>
+                                    <div class="truncate" title="AA:AA:AA:AA:AA:AA">MAC: AA:AA:AA...</div>
+                                    <div class="truncate text-amber-600" title="RR:RR:RR:RR:RR:RR">GW: RR:RR:RR...</div>
+                                </div>
+                                <div class="bg-slate-50 p-2 rounded border border-slate-100">
+                                    <div>SEQ: <span id="c-seq" class="text-blue-600 font-bold">0</span></div>
+                                    <div>ACK: <span id="c-ack" class="text-emerald-600 font-bold">0</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- WIRE -->
+                    <div class="flex-1 relative mx-4 flex items-center">
+                        <div class="w-full h-2 bg-slate-200 rounded-full relative overflow-visible" id="wire-track">
+                            <!-- Dynamic Packet -->
+                            <div id="packet-visual" class="absolute top-1/2 -mt-4 w-24 h-8 bg-blue-500 rounded shadow-md flex items-center justify-center text-white text-xs font-bold opacity-0 z-20 cursor-pointer hover:bg-red-500 transition-colors" title="Click to Drop Packet">
+                                <span id="pkt-label">SYN</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SERVER -->
+                    <div class="w-64 bg-white rounded-xl shadow-lg border border-slate-200 flex flex-col p-4 relative z-10">
+                        <div class="flex justify-between items-center border-b pb-2 mb-4">
+                            <span class="font-bold text-sm text-slate-700">SERVER</span>
+                            <span id="s-state" class="text-[10px] font-mono bg-slate-100 px-2 py-0.5 rounded text-slate-500">LISTEN</span>
+                        </div>
+                        
+                        <div class="flex flex-1 gap-4">
+                            <!-- State Info -->
+                            <div class="flex-1 flex flex-col justify-end text-xs font-mono text-slate-500 space-y-1">
+                                <div class="bg-slate-50 p-2 rounded border border-slate-100 mb-2">
+                                    <div class="text-[9px] uppercase font-bold text-slate-400 mb-1">Network Config</div>
+                                    <div>IP: 10.0.0.1</div>
+                                    <div class="truncate" title="BB:BB:BB:BB:BB:BB">MAC: BB:BB:BB...</div>
+                                </div>
+                                <div class="bg-slate-50 p-2 rounded border border-slate-100">
+                                    <div>SEQ: <span id="s-seq" class="text-blue-600 font-bold">0</span></div>
+                                    <div>ACK: <span id="s-ack" class="text-emerald-600 font-bold">0</span></div>
+                                </div>
+                            </div>
+                            <!-- Stack -->
+                            <div class="w-16 flex flex-col gap-1 justify-center">
+                                <div id="s-layer-7" class="layer-box border border-slate-200 bg-slate-50 rounded text-[9px] text-center py-1 text-slate-400 font-mono">APP</div>
+                                <div id="s-layer-4" class="layer-box border border-slate-200 bg-slate-50 rounded text-[9px] text-center py-1 text-slate-400 font-mono">TCP</div>
+                                <div id="s-layer-3" class="layer-box border border-slate-200 bg-slate-50 rounded text-[9px] text-center py-1 text-slate-400 font-mono">IP</div>
+                                <div id="s-layer-2" class="layer-box border border-slate-200 bg-slate-50 rounded text-[9px] text-center py-1 text-slate-400 font-mono">LINK</div>
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
-                <div class="mt-auto text-center">
-                    <button id="start-btn" onclick="startTransmission()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
-                        Start Transmission
+            </div>
+
+            <!-- Timeline Controls (Bottom) -->
+            <div class="bg-white border-t border-slate-200 p-4 z-20">
+                <div class="flex items-center gap-4 mb-2">
+                    <button id="btn-play" onclick="tcpDebugger.togglePlay()" class="w-8 h-8 flex items-center justify-center rounded-full bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-600 transition-colors">
+                        <svg id="icon-play" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                        <svg id="icon-pause" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 hidden" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
                     </button>
+                    
+                    <button onclick="tcpDebugger.step(-1)" class="p-1 hover:text-blue-600 text-slate-400"><svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m11 17-5-5 5-5"/><path d="m18 17-5-5 5-5"/></svg></button>
+                    
+                    <div class="flex-1 relative group">
+                        <input type="range" id="scrubber" min="0" max="0" value="0" step="1" oninput="tcpDebugger.scrub(this.value)" class="relative z-10">
+                        <!-- Progress Buffer -->
+                        <div class="absolute top-1/2 left-0 right-0 h-1 bg-slate-100 -mt-0.5 rounded"></div>
+                        <div id="scrubber-fill" class="absolute top-1/2 left-0 h-1 bg-blue-500 -mt-0.5 rounded pointer-events-none w-0"></div>
+                    </div>
+
+                    <button onclick="tcpDebugger.step(1)" class="p-1 hover:text-blue-600 text-slate-400"><svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m13 17 5-5-5-5"/><path d="m6 17 5-5-5-5"/></svg></button>
+                    
+                    <div class="font-mono text-xs text-slate-400 w-16 text-right"><span id="frame-idx">0</span>/<span id="frame-total">0</span></div>
+                </div>
+                <div class="text-center text-[10px] text-slate-400 uppercase font-bold tracking-widest" id="phase-label">Ready</div>
+            </div>
+
+        </main>
+
+        <!-- Right: Inspector Sidebar -->
+        <aside class="w-96 bg-white border-l border-slate-200 flex flex-col shadow-xl z-30">
+            <div class="p-4 border-b border-slate-100 bg-slate-50">
+                <div class="flex items-center justify-between mb-1">
+                    <h2 class="text-xs font-bold text-slate-700 uppercase tracking-wide">PDU Inspector</h2>
+                    <span id="pdu-loc" class="text-[9px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">IDLE</span>
+                </div>
+                <p class="text-[10px] text-slate-500 leading-tight">Inspecting encapsulation at this timestep.</p>
+            </div>
+            
+            <div id="inspector-content" class="flex-1 overflow-y-auto p-4 bg-slate-50/50 space-y-3">
+                <div class="text-center text-slate-400 text-xs italic mt-10">
+                    Generate a phase to inspect packets.
                 </div>
             </div>
-
-            <!-- The Network (Wire) -->
-            <div class="flex-1 relative mx-4 bg-slate-200/50 rounded-xl border-dashed border-2 border-slate-300 flex items-center justify-center overflow-hidden" id="network-zone">
-                <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <span class="text-slate-300 font-bold text-4xl opacity-50 tracking-widest">THE INTERNET</span>
-                </div>
-                <!-- Packets spawn here -->
+            
+            <!-- Log -->
+            <div class="h-1/3 border-t border-slate-200 bg-white flex flex-col">
+                <div class="p-2 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase">Event Log</div>
+                <div id="log-container" class="flex-1 overflow-y-auto p-2 space-y-1 font-mono text-[10px] text-slate-600"></div>
             </div>
+        </aside>
 
-            <!-- Receiver -->
-            <div class="w-48 bg-white border-2 border-slate-300 rounded-xl p-4 flex flex-col shadow-lg z-10">
-                <div class="font-bold text-center border-b pb-2 mb-2">RECEIVER</div>
-                <div class="text-xs text-slate-500 mb-1">Inbound Buffer</div>
-                <div id="receiver-buffer" class="grid grid-cols-5 gap-1 mb-auto">
-                    <!-- Buffer Slots JS -->
-                </div>
-                <div class="mt-4 p-2 bg-emerald-50 rounded border border-emerald-100 text-center">
-                    <div class="text-[10px] text-emerald-600 uppercase font-bold">Next Expected Seq</div>
-                    <div id="ack-display" class="text-2xl font-mono font-bold text-emerald-700">1</div>
-                </div>
-            </div>
-
-        </div>
-
-        <!-- Log Console -->
-        <div class="flex-1 bg-slate-900 rounded-xl p-4 font-mono text-sm overflow-hidden flex flex-col shadow-inner">
-            <div class="text-slate-400 text-xs uppercase tracking-wider mb-2 flex justify-between">
-                <span>Event Log</span>
-                <button onclick="clearLog()" class="hover:text-white">Clear</button>
-            </div>
-            <div id="console-log" class="flex-1 overflow-y-auto space-y-1 text-slate-300">
-                <div class="text-slate-500 italic">Waiting to start...</div>
-            </div>
-        </div>
-
-    </main>
+    </div>
 
     <script>
-        const TOTAL_PACKETS = 10;
-        let packets = [];
-        let nextSeqToSend = 1;
-        let nextExpectedSeq = 1;
-        let activeTimeouts = {}; // Store timer IDs for each packet
-        let transmissionActive = false;
-        let acknowledged = new Set();
-
-        // Init Buffers
-        function init() {
-            const sBuf = document.getElementById('sender-buffer');
-            const rBuf = document.getElementById('receiver-buffer');
-            sBuf.innerHTML = '';
-            rBuf.innerHTML = '';
-
-            for(let i=1; i<=TOTAL_PACKETS; i++) {
-                // Sender Buffer Visuals
-                const sSlot = document.createElement('div');
-                sSlot.className = `buffer-slot h-6 w-6 border border-slate-300 rounded flex items-center justify-center text-xs font-bold text-slate-400 bg-slate-50`;
-                sSlot.id = `s-slot-${i}`;
-                sSlot.innerText = i;
-                sBuf.appendChild(sSlot);
-
-                // Receiver Buffer Visuals
-                const rSlot = document.createElement('div');
-                rSlot.className = `buffer-slot h-6 w-6 border border-slate-300 rounded flex items-center justify-center text-xs font-bold text-slate-400 bg-slate-50`;
-                rSlot.id = `r-slot-${i}`;
-                rSlot.innerText = i;
-                rBuf.appendChild(rSlot);
-            }
-        }
-
-        function log(msg, type='info') {
-            const consoleDiv = document.getElementById('console-log');
-            const line = document.createElement('div');
+        /**
+         * The Time Machine Engine
+         */
+        window.tcpDebugger = {
+            frames: [],
+            currentFrame: 0,
+            isPlaying: false,
+            timer: null,
             
-            if(type === 'error') line.className = "text-red-400";
-            else if(type === 'success') line.className = "text-emerald-400";
-            else if(type === 'warn') line.className = "text-amber-400";
-            else line.className = "text-slate-300";
-
-            const time = new Date().toLocaleTimeString().split(' ')[0];
-            line.innerHTML = `<span class="opacity-50">[${time}]</span> ${msg}`;
-            consoleDiv.appendChild(line);
-            consoleDiv.scrollTop = consoleDiv.scrollHeight;
-        }
-
-        function clearLog() {
-            document.getElementById('console-log').innerHTML = '';
-        }
-
-        function startTransmission() {
-            if(transmissionActive) return;
-            transmissionActive = true;
-            document.getElementById('start-btn').classList.add('opacity-50', 'cursor-not-allowed');
-            log("--- Transmission Started ---", 'info');
-            sendNextBatch();
-        }
-
-        function sendNextBatch() {
-            if (nextSeqToSend > TOTAL_PACKETS) return;
+            // Simulation State Defaults
+            clientIP: '192.168.1.5',
+            serverIP: '10.0.0.1',
+            clientMAC: 'AA:AA:AA:AA:AA:AA',
+            serverMAC: 'BB:BB:BB:BB:BB:BB',
+            gatewayMAC: 'RR:RR:RR:RR:RR:RR', // Router
             
-            // Simple logic: send one packet every 1.5 seconds if not all done
-            const interval = setInterval(() => {
-                if (nextSeqToSend <= TOTAL_PACKETS) {
-                    sendPacket(nextSeqToSend);
-                    nextSeqToSend++;
-                } else {
-                    clearInterval(interval);
+            init() {
+                this.frames = [this.captureState('Ready', {})];
+                this.updateUI();
+                
+                document.getElementById('packet-visual').onclick = () => {
+                    this.killCurrentPacket();
+                };
+            },
+
+            // --- GENERATORS ---
+            
+            generatePhase(phaseName) {
+                this.pause();
+                this.frames = []; 
+                
+                if(phaseName === 'handshake') this.simHandshake();
+                if(phaseName === 'data') this.simDataTransfer();
+                if(phaseName === 'teardown') this.simTeardown();
+                
+                this.currentFrame = 0;
+                document.getElementById('scrubber').max = this.frames.length - 1;
+                document.getElementById('phase-label').innerText = phaseName.toUpperCase();
+                this.play();
+            },
+
+            simHandshake() {
+                let seqC = 100, seqS = 500;
+                
+                this.pushFrames('Client: Preparing SYN', { cState: 'SYN-SENT' }, 20);
+                this.animateStack('client', 'down', 'SYN');
+                this.animateWire('client', 'server', 'SYN', { type: 'SYN', seq: seqC, ack: 0 });
+                this.animateStack('server', 'up', 'SYN');
+                
+                this.pushFrames('Server: SYN Received. Sending SYN-ACK', { sState: 'SYN-RCVD', sAck: seqC+1 }, 20);
+                this.animateStack('server', 'down', 'SYN-ACK');
+                this.animateWire('server', 'client', 'SYN-ACK', { type: 'SYN-ACK', seq: seqS, ack: seqC+1 });
+                this.animateStack('client', 'up', 'SYN-ACK');
+                
+                this.pushFrames('Client: Connected. Sending ACK', { cState: 'ESTAB', cSeq: seqC+1, cAck: seqS+1 }, 20);
+                this.animateStack('client', 'down', 'ACK');
+                this.animateWire('client', 'server', 'ACK', { type: 'ACK', seq: seqC+1, ack: seqS+1 });
+                this.animateStack('server', 'up', 'ACK');
+                
+                this.pushFrames('Connection Established', { sState: 'ESTAB', sSeq: seqS+1, sAck: seqC+1 }, 10);
+            },
+
+            simDataTransfer() {
+                let seqC = 101, seqS = 501;
+                this.frames.push(this.captureState('Connected', { cState: 'ESTAB', sState: 'ESTAB', cSeq: seqC, sSeq: seqS }));
+
+                this.pushFrames('Client: Sending Data Payload', {}, 10);
+                this.animateStack('client', 'down', 'DATA');
+                this.animateWire('client', 'server', 'DATA', { type: 'PSH, ACK', seq: seqC, ack: seqS, data: '{ "msg": "Hello" }' });
+                this.animateStack('server', 'up', 'DATA');
+                
+                this.pushFrames('Server: Data Recv. Sending ACK', { sAck: seqC+15 }, 10);
+                this.animateStack('server', 'down', 'ACK');
+                this.animateWire('server', 'client', 'ACK', { type: 'ACK', seq: seqS, ack: seqC+15 });
+                this.animateStack('client', 'up', 'ACK');
+                
+                this.pushFrames('Transfer Complete', { cSeq: seqC+15 }, 10);
+            },
+
+            simTeardown() {
+                let seqC = 200, seqS = 600;
+                this.frames.push(this.captureState('Connected', { cState: 'ESTAB', sState: 'ESTAB', cSeq: seqC, sSeq: seqS }));
+
+                this.pushFrames('Client: Sending FIN', { cState: 'FIN-WAIT-1' }, 10);
+                this.animateStack('client', 'down', 'FIN');
+                this.animateWire('client', 'server', 'FIN', { type: 'FIN', seq: seqC, ack: seqS });
+                this.animateStack('server', 'up', 'FIN');
+                
+                this.pushFrames('Server: Recv FIN. Sending ACK', { sState: 'CLOSE-WAIT', sAck: seqC+1 }, 10);
+                this.animateStack('server', 'down', 'ACK');
+                this.animateWire('server', 'client', 'ACK', { type: 'ACK', seq: seqS, ack: seqC+1 });
+                this.animateStack('client', 'up', 'ACK');
+                
+                this.pushFrames('Server: Closing App. Sending FIN', { cState: 'FIN-WAIT-2', sState: 'LAST-ACK' }, 30);
+                this.animateStack('server', 'down', 'FIN');
+                this.animateWire('server', 'client', 'FIN', { type: 'FIN', seq: seqS, ack: seqC+1 });
+                this.animateStack('client', 'up', 'FIN');
+                
+                this.pushFrames('Client: Recv FIN. Sending Final ACK', { cState: 'TIME-WAIT', cAck: seqS+1 }, 10);
+                this.animateStack('client', 'down', 'ACK');
+                this.animateWire('client', 'server', 'ACK', { type: 'ACK', seq: seqC+1, ack: seqS+1 });
+                this.animateStack('server', 'up', 'ACK');
+                
+                this.pushFrames('Closed', { sState: 'CLOSED', cState: 'CLOSED' }, 20);
+            },
+
+            // --- ANIMATION HELPERS ---
+            
+            animateStack(side, dir, type) {
+                const layers = dir === 'down' ? [7,4,3,2] : [2,3,4,7];
+                layers.forEach(l => {
+                    const pdu = this.getPDU(type, side, l, (side === 'client' ? 'server' : 'client')); // Pass Destination
+                    this.frames.push(this.captureState(`${side.toUpperCase()} Stack: Layer ${l}`, {
+                        activeLayer: `${side[0]}-layer-${l}`,
+                        pdu: pdu,
+                        pduLoc: `${side.toUpperCase()} Layer ${l}`
+                    }));
+                    for(let i=0; i<3; i++) this.frames.push(this.getLastFrame());
+                });
+            },
+
+            animateWire(from, to, type, pduDetails) {
+                const steps = 40;
+                for(let i=0; i<=steps; i++) {
+                    let pct = i / steps * 100;
+                    if(from === 'server') pct = 100 - pct;
+                    
+                    this.frames.push(this.captureState(`Transmission: ${type}`, {
+                        packetVisible: true,
+                        packetLeft: `${pct}%`,
+                        packetLabel: type,
+                        pdu: this.getWirePDU(from, to, pduDetails),
+                        pduLoc: 'The Wire (Physical)'
+                    }));
                 }
-            }, 1000);
-        }
+            },
 
-        function sendPacket(seq) {
-            if (acknowledged.has(seq)) return; // Don't resend if already done (unless triggered by timeout)
+            // --- DATA HELPERS ---
 
-            log(`Sender: Sending Packet [SEQ ${seq}]`, 'info');
+            captureState(logMsg, changes, repeat = 1) {
+                changes = changes || {};
+                const last = this.getLastFrame() || {
+                    cState: 'CLOSED', sState: 'LISTEN',
+                    cSeq: 100, sSeq: 500, cAck: 0, sAck: 0,
+                    activeLayer: null,
+                    packetVisible: false,
+                    packetLeft: '0%',
+                    packetLabel: '',
+                    log: 'Ready',
+                    pdu: null,
+                    pduLoc: 'Idle'
+                };
+                const newState = { ...last, ...changes };
+                if(changes.log) newState.log = logMsg; else newState.log = logMsg;
+                return newState;
+            },
+
+            getLastFrame() {
+                return this.frames.length > 0 ? this.frames[this.frames.length - 1] : null;
+            },
+
+            pushFrames(msg, changes, count) {
+                const f = this.captureState(msg, changes);
+                for(let i=0; i<count; i++) this.frames.push(f);
+            },
+
+            // --- PDU LOGIC (Routing & Addressing) ---
             
-            // Visual Update Sender Buffer
-            const sSlot = document.getElementById(`s-slot-${seq}`);
-            if(sSlot) {
-                sSlot.classList.remove('bg-slate-50');
-                sSlot.classList.add('bg-blue-100', 'border-blue-400', 'text-blue-700');
-            }
+            getWirePDU(from, to, d) {
+                // Determine Source and Dest logic
+                const isClientSender = from === 'client';
+                const srcIP = isClientSender ? this.clientIP : this.serverIP;
+                const dstIP = isClientSender ? this.serverIP : this.clientIP;
+                
+                const srcMAC = isClientSender ? this.clientMAC : this.serverMAC;
+                
+                // ROUTING LOGIC:
+                // If I am Client sending to Server (10.x.x.x), I see it's remote.
+                // So I target my Gateway (Router) MAC.
+                // If I am Server sending to Client (192.x.x.x), I see it's remote.
+                // So I target my Gateway (Router) MAC.
+                
+                const dstMAC = this.gatewayMAC; // In this sim, both talk via gateway
+                const routeNote = "Dest IP is on different subnet.<br>Resolving Gateway IP via ARP...<br><strong>Targeting Gateway MAC.</strong>";
 
-            // Create Packet Element
-            const zone = document.getElementById('network-zone');
-            const packet = document.createElement('div');
-            packet.className = 'absolute w-12 h-8 bg-blue-500 rounded shadow-md flex items-center justify-center text-white font-bold text-sm cursor-pointer hover:bg-red-500 hover:scale-110 transition-transform z-20';
-            packet.innerText = seq;
-            packet.style.left = '0px';
-            packet.id = `pkt-${seq}-${Date.now()}`; // Unique ID for DOM
+                // Ensure tcp flags exist if pduDetails didn't come with a 'type' property (e.g. reused tcp object)
+                const flags = d.type || d.flags || 'UNKNOWN';
 
-            // Click to Kill
-            packet.onclick = () => {
-                killPacket(packet, seq);
-            };
+                return {
+                    eth: { src: srcMAC, dst: dstMAC, note: routeNote },
+                    ip: { src: srcIP, dst: dstIP },
+                    tcp: { srcPort: isClientSender?50123:80, dstPort: isClientSender?80:50123, seq: d.seq, ack: d.ack, flags: flags },
+                    data: d.data
+                };
+            },
 
-            zone.appendChild(packet);
-
-            // Animate
-            const zoneWidth = zone.offsetWidth - 50; // buffer for width
-            
-            // Move Logic
-            let pos = 0;
-            const speed = 2; // px per frame
-            
-            // Set Timeout (Retransmission Timer) - 4 seconds (simulation time)
-            if(activeTimeouts[seq]) clearTimeout(activeTimeouts[seq]);
-            
-            activeTimeouts[seq] = setTimeout(() => {
-                // If this runs, ACK was never received
-                if (!acknowledged.has(seq)) {
-                    log(`Sender: Timeout! Packet ${seq} ACK not received. Retransmitting...`, 'warn');
-                    // Remove the visual packet if it's still floating (ghost)
-                    if(packet.parentNode) packet.remove(); 
-                    sendPacket(seq);
+            getPDU(type, side, layer, destSide) {
+                // Guard against undefined type
+                type = type || '';
+                
+                // Simplified PDU builder
+                const isClient = side === 'client';
+                const pdu = {
+                    tcp: { flags: type, seq: 100, ack: 0 }
+                };
+                
+                if(layer <= 3) {
+                    pdu.ip = { 
+                        src: isClient ? this.clientIP : this.serverIP,
+                        dst: isClient ? this.serverIP : this.clientIP 
+                    };
                 }
-            }, 4000);
-
-            // Animation Loop
-            function move() {
-                if (!packet.parentNode) return; // Destroyed
-                pos += speed;
-                packet.style.left = pos + 'px';
-
-                if (pos >= zoneWidth) {
-                    // Arrived
-                    receivePacket(seq);
-                    packet.remove();
-                } else {
-                    requestAnimationFrame(move);
+                
+                if(layer <= 2) {
+                    // Logic: Building frame at sender
+                    pdu.eth = { 
+                        src: isClient ? this.clientMAC : this.serverMAC,
+                        dst: this.gatewayMAC, // Sender always targets Gateway for remote
+                        note: "Lookup Route Table... Next Hop: Gateway."
+                    };
                 }
-            }
-            requestAnimationFrame(move);
-        }
+                
+                if(layer === 7) pdu.data = type.includes('DATA') ? '{payload}' : null;
+                return pdu;
+            },
 
-        function killPacket(element, seq) {
-            // Visual
-            element.classList.add('explosion');
-            element.innerText = '💥';
-            log(`Network: Packet ${seq} DESTROYED in transit!`, 'error');
-            
-            setTimeout(() => {
-                if(element.parentNode) element.remove();
-            }, 500);
-            
-            // Note: We DO NOT clear the timeout. 
-            // The sender doesn't know it exploded. 
-            // The sender is still waiting. The timeout will trigger retransmission.
-        }
+            // --- PLAYBACK CONTROL ---
 
-        function receivePacket(seq) {
-            // Receiver Logic
-            log(`Receiver: Got Packet ${seq}`, 'success');
-            
-            // Update Visual Buffer
-            const rSlot = document.getElementById(`r-slot-${seq}`);
-            rSlot.classList.add('received');
-            
-            // Send ACK (Visual only for this sim, implied logic)
-            // In real TCP, Receiver checks order. 
-            if (seq === nextExpectedSeq) {
-                nextExpectedSeq++;
-                // Check if we have consecutive packets buffered
-                while (document.getElementById(`r-slot-${nextExpectedSeq}`)?.classList.contains('received')) {
-                    nextExpectedSeq++;
+            play() {
+                if(this.isPlaying) return;
+                this.isPlaying = true;
+                document.getElementById('icon-play').classList.add('hidden');
+                document.getElementById('icon-pause').classList.remove('hidden');
+                
+                this.timer = setInterval(() => {
+                    if(this.currentFrame < this.frames.length - 1) {
+                        this.currentFrame++;
+                        this.render();
+                    } else {
+                        this.pause();
+                    }
+                }, 30);
+            },
+
+            pause() {
+                this.isPlaying = false;
+                clearInterval(this.timer);
+                document.getElementById('icon-play').classList.remove('hidden');
+                document.getElementById('icon-pause').classList.add('hidden');
+            },
+
+            togglePlay() {
+                if(this.isPlaying) this.pause(); else this.play();
+            },
+
+            scrub(val) {
+                this.pause();
+                this.currentFrame = parseInt(val);
+                this.render();
+            },
+
+            step(dir) {
+                this.pause();
+                const next = this.currentFrame + dir;
+                if(next >= 0 && next < this.frames.length) {
+                    this.currentFrame = next;
+                    this.render();
                 }
-            }
+            },
+
+            // --- INTERACTIVITY ---
+            killCurrentPacket() {
+                const f = this.frames[this.currentFrame];
+                if(!f.packetVisible) return;
+
+                this.pause();
+                
+                this.frames = this.frames.slice(0, this.currentFrame + 1);
+                
+                this.frames.push(this.captureState("Packet Destroyed!", { 
+                    packetLabel: '💥', 
+                    log: 'Packet Lost. Waiting for Timeout...' 
+                }));
+                
+                for(let i=0; i<30; i++) this.frames.push(this.getLastFrame());
+                
+                const lastPDU = f.pdu;
+                // Ensure we pass flags (type) explicitly if recreating from a captured PDU object
+                const flags = lastPDU.tcp.flags; 
+                // Reconstruct a pduDetails object that has the 'type' property expected by getWirePDU
+                const retransPDU = { ...lastPDU.tcp, type: flags };
+
+                this.pushFrames('Timeout Expired. Retransmitting...', {}, 10);
+                this.animateStack('client', 'down', flags); 
+                this.animateWire('client', 'server', flags, retransPDU); 
+                
+                document.getElementById('scrubber').max = this.frames.length - 1;
+                this.play();
+            },
+
+            // --- RENDERER ---
+            updateUI() { this.render(); },
             
-            document.getElementById('ack-display').innerText = nextExpectedSeq;
-            
-            // Send ACK Packet back
-            sendAck(seq, nextExpectedSeq);
-        }
+            render() {
+                const f = this.frames[this.currentFrame];
+                if(!f) return;
 
-        function sendAck(seqReceived, nextExpected) {
-            // Create ACK Packet
-            const zone = document.getElementById('network-zone');
-            const ack = document.createElement('div');
-            ack.className = 'absolute w-12 h-6 bg-emerald-500 rounded-full shadow-md flex items-center justify-center text-white font-bold text-xs z-20 border-2 border-white';
-            ack.innerText = `ACK ${nextExpected}`; // TCP usually ACKs the NEXT expected
-            ack.style.right = '0px'; // Start at right
-            
-            zone.appendChild(ack);
+                const scrub = document.getElementById('scrubber');
+                scrub.value = this.currentFrame;
+                document.getElementById('scrubber-fill').style.width = (this.currentFrame / scrub.max * 100) + '%';
+                
+                document.getElementById('frame-idx').innerText = this.currentFrame;
+                document.getElementById('frame-total').innerText = this.frames.length;
 
-            const zoneWidth = zone.offsetWidth - 50;
-            let pos = 0;
-            const speed = 3; // ACKs are fast :)
+                document.getElementById('c-state').innerText = f.cState;
+                document.getElementById('s-state').innerText = f.sState;
+                document.getElementById('c-seq').innerText = f.cSeq;
+                document.getElementById('c-ack').innerText = f.cAck;
+                document.getElementById('s-seq').innerText = f.sSeq;
+                document.getElementById('s-ack').innerText = f.sAck;
 
-            function moveAck() {
-                if (!ack.parentNode) return;
-                pos += speed;
-                ack.style.right = pos + 'px';
+                document.querySelectorAll('.layer-box').forEach(el => el.classList.remove('layer-active'));
+                if(f.activeLayer) document.getElementById(f.activeLayer)?.classList.add('layer-active');
 
-                if (pos >= zoneWidth) {
-                    // Arrived at Sender
-                    processAck(seqReceived);
-                    ack.remove();
-                } else {
-                    requestAnimationFrame(moveAck);
+                const pkt = document.getElementById('packet-visual');
+                pkt.style.opacity = f.packetVisible ? 1 : 0;
+                pkt.style.left = f.packetLeft;
+                pkt.innerText = f.packetLabel;
+
+                this.renderPDU(f.pdu, f.pduLoc);
+
+                const log = document.getElementById('log-container');
+                if(log.lastChild?.innerText !== `[${this.currentFrame}] ${f.log}`) {
+                    const line = document.createElement('div');
+                    line.innerText = `[${this.currentFrame}] ${f.log}`;
+                    log.appendChild(line);
+                    log.scrollTop = log.scrollHeight;
                 }
+            },
+
+            renderPDU(pdu, loc) {
+                const container = document.getElementById('inspector-content');
+                document.getElementById('pdu-loc').innerText = loc || "IDLE";
+                
+                if(!pdu) {
+                    container.innerHTML = '<div class="text-center text-slate-400 text-xs italic mt-4">No Packet Active</div>';
+                    return;
+                }
+
+                let html = '';
+                
+                if(pdu.eth) html += `
+                    <div class="pdu-block border-amber-400">
+                        <div class="pdu-label bg-amber-50"><span>Ethernet (L2)</span> <span class="text-amber-600">FRAME</span></div>
+                        <div class="pdu-data">
+                            <div><span class="text-slate-400">Src:</span> ${pdu.eth.src}</div>
+                            <div><span class="text-slate-400">Dst:</span> ${pdu.eth.dst}</div>
+                            ${pdu.eth.note ? `<div class="logic-note"><strong>Routing Logic:</strong> ${pdu.eth.note}</div>` : ''}
+                        </div>
+                    </div>`;
+                
+                if(pdu.ip) html += `
+                    <div class="pdu-block border-blue-400 ml-1">
+                        <div class="pdu-label bg-blue-50"><span>IP (L3)</span> <span class="text-blue-600">PACKET</span></div>
+                        <div class="pdu-data">
+                            <div><span class="text-slate-400">Src:</span> ${pdu.ip.src}</div>
+                            <div><span class="text-slate-400">Dst:</span> ${pdu.ip.dst}</div>
+                            <div><span class="text-slate-400">Proto:</span> TCP (6)</div>
+                        </div>
+                    </div>`;
+
+                if(pdu.tcp) html += `
+                    <div class="pdu-block border-purple-400 ml-2">
+                        <div class="pdu-label bg-purple-50"><span>TCP (L4)</span> <span class="text-purple-600">SEGMENT</span></div>
+                        <div class="pdu-data">
+                            <div><span class="text-slate-400">Ports:</span> ${pdu.tcp.srcPort || 0} → ${pdu.tcp.dstPort || 0}</div>
+                            <div><span class="text-slate-400">Flags:</span> [${pdu.tcp.flags}]</div>
+                            <div><span class="text-slate-400">Seq:</span> ${pdu.tcp.seq} | <span class="text-slate-400">Ack:</span> ${pdu.tcp.ack}</div>
+                        </div>
+                    </div>`;
+
+                if(pdu.data) html += `
+                    <div class="pdu-block border-rose-400 ml-3">
+                        <div class="pdu-label bg-rose-50"><span>App (L7)</span> <span class="text-rose-600">DATA</span></div>
+                        <div class="pdu-data break-all">
+                            ${pdu.data}
+                        </div>
+                    </div>`;
+
+                container.innerHTML = html;
             }
-            requestAnimationFrame(moveAck);
-        }
+        };
 
-        function processAck(seqAcked) {
-            if (acknowledged.has(seqAcked)) return;
-            
-            log(`Sender: Received ACK for ${seqAcked}. Marked safe.`, 'success');
-            acknowledged.add(seqAcked);
-            
-            // Clear Timeout
-            if(activeTimeouts[seqAcked]) {
-                clearTimeout(activeTimeouts[seqAcked]);
-                delete activeTimeouts[seqAcked];
-            }
-
-            // Update Sender Buffer Visual (Green for safe)
-            const sSlot = document.getElementById(`s-slot-${seqAcked}`);
-            sSlot.classList.remove('bg-blue-100', 'text-blue-700', 'border-blue-400');
-            sSlot.classList.add('bg-emerald-100', 'text-emerald-700', 'border-emerald-400');
-        }
-
-        init();
+        tcpDebugger.init();
 
     </script>
 </body>
